@@ -1538,15 +1538,18 @@ function useAnchoMedido(){
 // ─── DISPOSICIÓN DE LOS TECLADOS: lado a lado (izquierda a la izquierda) o apilados ─────────
 const anchoMano = (btns)=> btns.length ? Math.max(...btns.map(b=>b.x))+BTN_SIZE+16 : 740;
 function useDisposicion(){
-  const [lado,setLado]=useState(true);
+  const [lado,setLadoS]=useState(()=>{ try{ return localStorage.getItem("harmonia_lado")!=="0"; }catch(e){ return true; } });
+  const setLado=(v)=>{ setLadoS(v); try{ localStorage.setItem("harmonia_lado",v?"1":"0"); }catch(e){} };
   const [full,setFull]=useState(false);
+  const [invertir,setInvertirS]=useState(()=>{ try{ return localStorage.getItem("harmonia_invertir")==="1"; }catch(e){ return false; } });
+  const setInvertir=(v)=>{ setInvertirS(v); try{ localStorage.setItem("harmonia_invertir",v?"1":"0"); }catch(e){} };
   useEffect(()=>{
     const f=()=>setFull(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange",f);
     return ()=>document.removeEventListener("fullscreenchange",f);
   },[]);
   const toggleFull=()=>{ try{ if(document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }catch(e){} };
-  return {lado,setLado,full,toggleFull};
+  return {lado,setLado,full,toggleFull,invertir,setInvertir};
 }
 // Con ambos teclados y modo "lado a lado", los dos usan la misma escala y llenan todo el ancho.
 function calcAnchos(wrapWidth,L,R,ambas,lado,isMobile){
@@ -1562,6 +1565,7 @@ function ControlesDisposicion({d,isMobile}){
     <div style={{display:"flex",background:"#121212",border:"1.5px solid #333333",borderRadius:10,padding:3,gap:2}}>
       {!isMobile && <button style={on(d.lado)} onClick={()=>d.setLado(true)} title="Izquierda a la izquierda, derecha a la derecha">◫ Lado a lado</button>}
       {!isMobile && <button style={on(!d.lado)} onClick={()=>d.setLado(false)} title="Uno debajo del otro, más grandes">☰ Apilados</button>}
+      {(isMobile||!d.lado) && <button style={on(d.invertir)} onClick={()=>d.setInvertir(!d.invertir)} title="Apilados: derecha arriba e izquierda abajo">⇅ Derecha arriba</button>}
       <button style={on(d.full)} onClick={d.toggleFull} title="Usa toda la pantalla">{d.full?"⛶ Salir":"⛶ Pantalla completa"}</button>
     </div>
   );
@@ -2449,7 +2453,7 @@ function BandoneonTab() {
           que estén visibles, para garantizar que SIEMPRE entren sin recortarse. */}
       <div ref={canvasWrapRef} style={{
         display: "flex",
-        flexDirection: an.fila ? "row" : "column",
+        flexDirection: an.fila ? "row" : (disp.invertir ? "column-reverse" : "column"),
         gap: an.gap,
         alignItems: an.fila ? "flex-start" : "stretch",
         paddingBottom: 8,
@@ -3722,7 +3726,7 @@ function EntrenadorTab({preset}={}){
       </div>
 
       {/* Teclados */}
-      <div ref={wrapRef} style={{display:"flex",flexDirection:an.fila?"row":"column",gap:an.gap,alignItems:an.fila?"flex-start":"stretch",paddingBottom:8}}>
+      <div ref={wrapRef} style={{display:"flex",flexDirection:an.fila?"row":(disp.invertir?"column-reverse":"column"),gap:an.gap,alignItems:an.fila?"flex-start":"stretch",paddingBottom:8}}>
         {(view==="ambas"||view==="izquierda")&&(
           <div style={{width: an.fila ? an.aL : "100%", flexShrink:0}}>
             <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO IZQUIERDA · {leftBtns.length} botones</p>
@@ -4479,6 +4483,221 @@ function MisTareasTab({onPracticar}){
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ─── MODOS (transportables) y COLORES (lineal · circular · espiral) ──────────
+// ═══════════════════════════════════════════════════════════════════════════
+const tocarNombres=(names,oct=4)=>{ let o=oct, prev=-1; names.forEach((n,i)=>{ const pc=noteIdx(n); if(pc<=prev) o++; prev=pc; setTimeout(()=>playBand(CHROMATIC[pc],o),i*420); }); };
+
+function ModosTab(){
+  const [root,setRoot]=useState("C");
+  const [vista,setVista]=useState("rel");      // rel: modos de la escala mayor de X · par: todos desde la misma tónica
+  const major=buildScale(root,[0,2,4,5,7,9,11]);
+  const usos=["Tónica mayor, jazz, bossa nova, pop","II grado, jazz-funk, tango luminoso","III grado, color oscuro, transición","IV mayor, bossa nova, jazz moderno","V7, dominante de todos los estilos","VI grado, balada, tango en menor","VII°, paso cromático, tango expresivo"];
+  return(
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>Modos</h2>
+        <p className="text-xs text-gray-500">Los 7 modos, sus tensiones y su uso en tango y jazz. Elegí la tónica para transportarlos a cualquier tonalidad.</p>
+      </div>
+      <div style={{background:"#121214",border:"1px solid #26262a",borderRadius:12,padding:"12px 14px"}}>
+        <p style={{...uiLabel,marginBottom:8}}>Tónica</p>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {ACORDE_RAICES.map(x=>(<button key={x} style={uiPill(root===x,{padding:"5px 11px"})} onClick={()=>setRoot(x)}>{nombreLat(x)}</button>))}
+        </div>
+        <p style={{...uiLabel,marginBottom:8}}>Cómo mostrarlos</p>
+        <div className="flex flex-wrap gap-1.5">
+          <button style={uiPill(vista==="rel",{padding:"6px 13px"})} onClick={()=>setVista("rel")}>Modos de la escala mayor de {nombreLat(root)}</button>
+          <button style={uiPill(vista==="par",{padding:"6px 13px"})} onClick={()=>setVista("par")}>Todos desde {nombreLat(root)} (paralelos)</button>
+        </div>
+      </div>
+      {MODE_BY_DEGREE.map((md,i)=>{
+        const modeRoot = vista==="rel" ? major[i] : root;
+        const notas=buildScale(modeRoot,md.ivs);
+        const twn=md.tensions.map(t=>({label:t,note:tNote(modeRoot,t)}));
+        const awn=md.avoid.map(t=>({label:t,note:tNote(modeRoot,t)}));
+        return(
+          <div key={i} className="rounded-xl overflow-hidden" style={{background:"#121214",border:"1px solid #26262a"}}>
+            <div className="px-4 py-3" style={{borderBottom:"1px solid #1f1f22"}}>
+              <div className="flex items-center gap-3 flex-wrap">
+                <span style={{fontFamily:"monospace",fontWeight:800,fontSize:13,padding:"4px 9px",borderRadius:8,background:"#1a1a1a",color:"#e6e6e6",border:"1px solid #2a2a2e"}}>{DN[i]}</span>
+                <div style={{flex:"1 1 200px"}}>
+                  <p style={{fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:16,margin:0}}>{nombreLat(modeRoot)} {md.name}</p>
+                  <p style={{fontSize:11.5,color:"#8a8a90",margin:"2px 0 0"}}>{md.q} — {vista==="rel"?`grado ${DN[i]} de la escala mayor de ${nombreLat(root)}`:`desde ${nombreLat(root)}`}</p>
+                </div>
+                <button style={uiPill(false,{padding:"5px 12px",fontSize:11})} onClick={()=>tocarNombres([...notas,notas[0]])}>▶ Escuchar</button>
+              </div>
+            </div>
+            <div className="px-4 py-3 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {notas.map((n,ni)=>(
+                  <div key={ni} className="flex flex-col items-center gap-1" style={{minWidth:34}}>
+                    <NotaDot note={n} size={32}/>
+                    <span style={{fontSize:9,color:"#6a6a70",fontFamily:"monospace"}}>{GRADO_LABEL[md.ivs[ni]]}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div style={{border:"1px solid #1f3a1f",borderRadius:10,padding:"9px 10px",background:"#0a100a"}}>
+                  <p style={{fontSize:11,fontWeight:800,color:"#7fcf7f",margin:"0 0 6px"}}>✅ Tensiones</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {twn.map((t,j)=>(<TensionChip key={j} label={t.label} note={t.note} tipo="ok"/>))}
+                    {!twn.length && <span style={{fontSize:11,color:"#555"}}>Sin tensiones adicionales</span>}
+                  </div>
+                </div>
+                <div style={{border:"1px solid #3a1f1f",borderRadius:10,padding:"9px 10px",background:"#100a0a"}}>
+                  <p style={{fontSize:11,fontWeight:800,color:"#d98a8a",margin:"0 0 6px"}}>⚠️ Evitar</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {awn.map((t,j)=>(<TensionChip key={j} label={t.label} note={t.note} tipo="no"/>))}
+                    {!awn.length && <span style={{fontSize:11,color:"#555"}}>—</span>}
+                  </div>
+                </div>
+              </div>
+              <p style={{fontSize:12,color:"#8a8a90",margin:0}}><span style={{color:"#a3a3a3",fontWeight:600}}>Uso típico: </span>{usos[i]}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Tres formas de ver una escala ──
+function VistaLineal({root,esc,romano}){
+  const r=noteIdx(root), escritas=buildScale(root,esc.ivs), nom={}; escritas.forEach(n=>{ nom[noteIdx(n)]=nombreLat(n); });
+  const miembros=[...esc.ivs,12], set=new Set(miembros), W=60, top=34, H=70;
+  return(
+    <svg viewBox="0 0 780 170" width="100%" style={{display:"block"}}>
+      {[...Array(13).keys()].map(j=>{
+        const pc=(r+j)%12, on=set.has(j), col=nc(CHROMATIC[pc]), x=j*W+2, g=j===12?"8":GRADO_LABEL[j];
+        const a=r+j;
+        return(
+          <g key={j} onClick={()=>playBand(CHROMATIC[pc],4+Math.floor(a/12))} style={{cursor:"pointer",opacity:on?1:0.17,transition:"opacity .2s"}}>
+            {on && <text x={x+28} y={22} textAnchor="middle" style={{fontFamily:UI_FONT,fontWeight:800,fontSize:13,fill:"#cfcfd4"}}>{romano?aRomano(g):g}</text>}
+            <rect x={x} y={top} width={56} height={H} rx={11} fill={col} stroke={on?"rgba(255,255,255,.5)":"rgba(255,255,255,.1)"} strokeWidth="1.5"/>
+            <text x={x+28} y={top+H/2+1} textAnchor="middle" dominantBaseline="middle" style={{fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:17,fill:txtSobre(col),pointerEvents:"none"}}>{(on?(nom[pc]||CROM_SIMPLE[CHROMATIC[pc]]):CROM_SIMPLE[CHROMATIC[pc]]).split(" ")[0]}</text>
+          </g>
+        );
+      })}
+      {miembros.slice(0,-1).map((j,k)=>{
+        const b=miembros[k+1], xa=j*W+30, xb=b*W+30, y=top+H+26;
+        return(
+          <g key={k}>
+            <path d={`M${xa} ${y-7} V${y} H${xb} V${y-7}`} fill="none" stroke="#6a6a70" strokeWidth="1.6" strokeLinejoin="round"/>
+            <text x={(xa+xb)/2} y={y+17} textAnchor="middle" style={{fontFamily:"monospace",fontWeight:800,fontSize:13,fill:"#a0a0a6"}}>{pasoLabel(b-j)}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function VistaCircular({root,esc,romano}){
+  const r=noteIdx(root), escritas=buildScale(root,esc.ivs), pcs=escritas.map(noteIdx), nom={}; escritas.forEach(n=>{ nom[noteIdx(n)]=nombreLat(n); });
+  const C=200, R0=96, R1=170;
+  const puntos=pcs.map(pc=>cqPol(C,C,R0-14,pc*30));
+  const orden=[...pcs].sort((a,b)=>((a-r+12)%12)-((b-r+12)%12));
+  const poli=orden.map(pc=>cqPol(C,C,R0-14,pc*30)).map((p,i)=>`${i?"L":"M"}${p[0]} ${p[1]}`).join(" ")+" Z";
+  return(
+    <svg viewBox="0 0 400 400" width="100%" style={{display:"block",overflow:"visible"}}>
+      {[...Array(12).keys()].map(pc=>{
+        const a=pc*30, on=pcs.includes(pc), col=nc(CHROMATIC[pc]), [tx,ty]=cqPol(C,C,(R0+R1)/2,a);
+        return(
+          <g key={pc} onClick={()=>playBand(CHROMATIC[pc],4)} style={{cursor:"pointer",opacity:on?1:0.17,transition:"opacity .2s"}}>
+            <path d={cqSector(C,C,R0,R1,a-14.3,a+14.3)} fill={col} stroke={on?"rgba(255,255,255,.5)":"rgba(255,255,255,.1)"} strokeWidth="1.3"/>
+            <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" style={{fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:16,fill:txtSobre(col),pointerEvents:"none"}}>{(nom[pc]||CROM_SIMPLE[CHROMATIC[pc]]).split(" ")[0]}</text>
+          </g>
+        );
+      })}
+      <path d={poli} fill="rgba(255,255,255,.06)" stroke="rgba(255,255,255,.55)" strokeWidth="1.5" strokeLinejoin="round"/>
+      {pcs.map((pc,i)=>{ const [x,y]=puntos[i]; return(<g key={i} style={{pointerEvents:"none"}}><circle cx={x} cy={y} r={10} fill={nc(CHROMATIC[pc])} stroke="#fff" strokeWidth="1.3"/>
+        <text x={x} y={y+0.5} textAnchor="middle" dominantBaseline="middle" style={{fontFamily:UI_FONT,fontWeight:800,fontSize:8.5,fill:txtSobre(nc(CHROMATIC[pc]))}}>{romano?aRomano(GRADO_LABEL[esc.ivs[i]]):GRADO_LABEL[esc.ivs[i]]}</text></g>); })}
+      <text x={C} y={C-4} textAnchor="middle" style={{fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:22,fill:"#ececec"}}>{nombreLat(root)}</text>
+      <text x={C} y={C+16} textAnchor="middle" style={{fontFamily:UI_FONT,fontSize:10.5,fill:"#8a8a90"}}>{esc.corto.toLowerCase()}</text>
+    </svg>
+  );
+}
+
+function VistaEspiral({root,esc}){
+  const r=noteIdx(root), escritas=buildScale(root,esc.ivs), nom={}; escritas.forEach(n=>{ nom[noteIdx(n)]=nombreLat(n); });
+  const set=new Set(esc.ivs), C=240, VUELTAS=3, N=12*VUELTAS;
+  const rad=(n)=>34+n*5.3;
+  const pt=(n)=>cqPol(C,C,rad(n),n*30);
+  let d=""; for(let k=0;k<=N*10;k++){ const n=k/10, [x,y]=cqPol(C,C,rad(n),n*30); d+=(k?"L":"M")+x.toFixed(1)+" "+y.toFixed(1)+" "; }
+  return(
+    <svg viewBox="0 0 480 480" width="100%" style={{display:"block",overflow:"visible"}}>
+      <path d={d} fill="none" stroke="#2c2c30" strokeWidth="2"/>
+      {[...Array(N+1).keys()].map(n=>{
+        const pc=(r+n)%12, on=set.has(n%12)||(n%12===0), col=nc(CHROMATIC[pc]), [x,y]=pt(n), a=r+n, oct=3+Math.floor(a/12);
+        const esRaiz=n%12===0;
+        return(
+          <g key={n} onClick={()=>playBand(CHROMATIC[pc],oct)} style={{cursor:"pointer"}}>
+            {on ? (<>
+              <circle cx={x} cy={y} r={esRaiz?16:14} fill={col} stroke={esRaiz?"#fff":"rgba(255,255,255,.45)"} strokeWidth={esRaiz?2.4:1.3}/>
+              <text x={x} y={y+0.5} textAnchor="middle" dominantBaseline="middle" style={{fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:11,fill:txtSobre(col),pointerEvents:"none"}}>{(nom[pc]||CROM_SIMPLE[CHROMATIC[pc]]).split(" ")[0]}</text>
+              {esRaiz && <text x={x} y={y+27} textAnchor="middle" style={{fontFamily:"monospace",fontSize:10,fill:"#8a8a90",pointerEvents:"none"}}>{oct}</text>}
+            </>) : (<circle cx={x} cy={y} r={5} fill={col} opacity=".3"/>)}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function ColoresTab(){
+  const [root,setRoot]=useState("C");
+  const [escId,setEscId]=useState("mayor");
+  const [forma,setForma]=useState("circular");
+  const [romano]=useRomanos();
+  const esc=ESCALAS_HERO.find(e=>e.id===escId);
+  const escritas=buildScale(root,esc.ivs);
+  const FORMAS=[["lineal","▭ Lineal"],["circular","◯ Circular"],["espiral","◎ Espiral"]];
+  const DESC={lineal:"Los semitonos en fila, de la tónica a la octava, con la distancia (T tono, S semitono) entre las notas de la escala.",
+              circular:"Los doce colores en círculo: la escala dibuja una figura, siempre la misma forma en cualquier tonalidad.",
+              espiral:"La altura crece a medida que se sube: cada vuelta es una octava y la tónica queda siempre arriba."};
+  const card={background:"#121214",border:"1px solid #26262a",borderRadius:14,padding:"14px"};
+  return(
+    <div>
+      <div className="mb-4">
+        <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>Colores</h2>
+        <p className="text-xs text-gray-500">Una escala, tres maneras de verla. Elegí tonalidad y escala; tocá cualquier color para escucharlo.</p>
+      </div>
+      <div style={{...card,marginBottom:12}}>
+        <p style={{...uiLabel,marginBottom:8}}>Tonalidad</p>
+        <div className="flex flex-wrap gap-1.5 mb-3">{ACORDE_RAICES.map(x=>(<button key={x} style={uiPill(root===x,{padding:"5px 11px"})} onClick={()=>setRoot(x)}>{nombreLat(x)}</button>))}</div>
+        <p style={{...uiLabel,marginBottom:8}}>Escala</p>
+        <div className="flex flex-wrap gap-1.5">{ESCALAS_HERO.map(e=>(<button key={e.id} style={uiPill(escId===e.id,{padding:"5px 11px"})} onClick={()=>setEscId(e.id)}>{e.corto}</button>))}</div>
+      </div>
+
+      <div style={card}>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div className="flex gap-1.5">{FORMAS.map(([v,l])=>(<button key={v} style={uiPill(forma===v,{padding:"6px 14px"})} onClick={()=>setForma(v)}>{l}</button>))}</div>
+          <button style={uiPill(false,{padding:"6px 14px",borderColor:"#ececec",color:"#ececec"})} onClick={()=>tocarNombres([...escritas,escritas[0]])}>▶ Tocar escala</button>
+        </div>
+        <p style={{fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:15,margin:"6px 0 2px"}}>{nombreLat(root)} {esc.nombre}</p>
+        <p style={{fontSize:11.5,color:"#8a8a90",margin:"0 0 10px"}}>{escritas.map(nombreLat).join(" · ")} — {DESC[forma]}</p>
+        <div style={{maxWidth:forma==="lineal"?"100%":(forma==="espiral"?400:360),margin:"0 auto"}}>
+          {forma==="lineal" && <VistaLineal root={root} esc={esc} romano={romano}/>}
+          {forma==="circular" && <VistaCircular root={root} esc={esc} romano={romano}/>}
+          {forma==="espiral" && <VistaEspiral root={root} esc={esc}/>}
+        </div>
+      </div>
+
+      {/* referencia: la paleta */}
+      <div style={{...card,marginTop:12}}>
+        <p style={{...uiLabel,marginBottom:10}}>Paleta de referencia</p>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:"10px 6px"}}>
+          {[...Array(12).keys()].map(pc=>(
+            <button key={pc} onClick={()=>playBand(CHROMATIC[pc],4)} style={{background:"none",border:"none",padding:0,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
+              <span style={{width:34,height:34,borderRadius:"50%",background:nc(CHROMATIC[pc]),border:"2px solid rgba(255,255,255,.3)",display:"block"}}/>
+              <span style={{fontSize:10.5,color:"#cfcfd4",fontFamily:"'Libre Baskerville',serif",fontWeight:700}}>{NOMBRES_PC[pc].replace(" / ","/")}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP PRINCIPAL ────────────────────────────────────────────────────────────
 export default function HarmoniaApp(){
   const[tab,setTab]=useState("codigo");
@@ -4955,142 +5174,10 @@ export default function HarmoniaApp(){
             {tab==="circle"&&<CirculoQuintas/>}
 
             {/* ══ MODOS ══ */}
-            {tab==="modos"&&(
-              <div className="stagger space-y-4">
-                <div>
-                  <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>📐 Modos de la Escala Mayor</h2>
-                  <p className="text-xs text-gray-500">Los 7 modos griegos, sus tensiones y su uso en tango y jazz</p>
-                </div>
-                {MODE_BY_DEGREE.map((md,i)=>{
-                  const root="C";
-                  const scale=buildScale(root,md.ivs);
-                  const rootOfMode=scale[i]||root;
-                  const scaleFromMode=buildScale(rootOfMode,md.ivs);
-                  const twn=md.tensions.map(t=>({label:t,note:tNote(rootOfMode,t)}));
-                  const awn=md.avoid.map(t=>({label:t,note:tNote(rootOfMode,t)}));
-                  return(
-                    <div key={i} className="rounded-xl border border-gray-700 overflow-hidden" style={{background:"#121212"}}>
-                      <div className="px-4 py-3 border-b border-gray-800" style={{background:"#121212"}}>
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono font-bold px-2 py-1 rounded text-sm"
-                            style={{background:nc(CHROMATIC[(noteIdx("C")+MSI[i])%12])+"33",
-                              color:nc(CHROMATIC[(noteIdx("C")+MSI[i])%12])}}>
-                            {DN[i]}
-                          </span>
-                          <div>
-                            <p className="font-bold text-base text-white">{md.name}</p>
-                            <p className="text-xs text-gray-500">{md.q} — Grado {DN[i]} de la escala mayor</p>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="px-4 py-3 space-y-3">
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1.5">Escala desde C {md.name}:</p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {buildScale("C",md.ivs).map((n,ni)=>(
-                              <button key={ni} onClick={()=>playTone(n,4,0.5)}
-                                className="flex flex-col items-center px-2 py-1.5 rounded-lg border text-xs font-bold"
-                                style={{backgroundColor:nc(n)+"22",borderColor:nc(n)+"55",color:nc(n),minWidth:"30px"}}>
-                                <span>{n}</span>
-                                <span style={{fontSize:"8px",opacity:0.5}}>{ni+1}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="rounded-lg p-2.5 border border-green-900" style={{background:"#070f07"}}>
-                            <p className="text-xs font-bold text-green-400 mb-1.5">✅ Tensiones</p>
-                            <div className="flex flex-wrap gap-1">
-                              {twn.map(({label,note},j)=>{
-                                const color=note?nc(note):"#6dbd6d";
-                                return(
-                                  <span key={j} className="px-1.5 py-0.5 rounded border font-mono text-xs"
-                                    style={{background:color+"18",borderColor:color+"55",color}}>
-                                    {label}{note?`→${note}`:""}
-                                  </span>
-                                );
-                              })}
-                              {!twn.length&&<span className="text-gray-700 text-xs">Sin tensiones adicionales</span>}
-                            </div>
-                          </div>
-                          <div className="rounded-lg p-2.5 border border-red-900" style={{background:"#0f0707"}}>
-                            <p className="text-xs font-bold text-red-400 mb-1.5">⚠️ Evitar</p>
-                            <div className="flex flex-wrap gap-1">
-                              {awn.map(({label,note},j)=>{
-                                const color=note?nc(note):"#bd6d6d";
-                                return(
-                                  <span key={j} className="px-1.5 py-0.5 rounded border font-mono text-xs"
-                                    style={{background:color+"18",borderColor:color+"55",color}}>
-                                    {label}{note?`→${note}`:""}
-                                  </span>
-                                );
-                              })}
-                              {!awn.length&&<span className="text-gray-700 text-xs">—</span>}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          <span className="text-[#a3a3a3] font-semibold">Uso típico: </span>
-                          {[
-                            "Tónica mayor, jazz, bossa nova, pop",
-                            "ii grado, jazz-funk, tango luminoso",
-                            "iii grado, color oscuro, transición",
-                            "IV mayor, bossa nova, jazz moderno",
-                            "V7, dominante de todos los estilos",
-                            "vi grado, balada, tango en menor",
-                            "vii°, paso cromático, tango expresivo",
-                          ][i]}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {tab==="modos"&&<ModosTab/>}
 
             {/* ══ COLORES ══ */}
-            {tab==="colors"&&(
-              <div className="stagger">
-                <div className="mb-4">
-                  <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>🎨 Sistema Cromático Tonal</h2>
-                  <p className="text-xs text-gray-500">Cada nota tiene un color único. Tocá para escuchar.</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3 mb-6">
-                  {Object.entries(NC).filter(([n])=>n.length===1).map(([note,hex])=>(
-                    <div key={note} className="rounded-xl p-4 border cursor-pointer"
-                      style={{background:hex+"11",borderColor:hex+"44"}}
-                      onClick={()=>playTone(note,4,0.7)}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full border-2" style={{background:hex,borderColor:hex}}/>
-                        <div>
-                          <p className="text-xl font-bold" style={{color:hex,fontFamily:"'Libre Baskerville',serif"}}>{note}</p>
-                          <p className="text-xs font-mono text-gray-600">{hex}</p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">Notas alteradas</p>
-                <div className="grid grid-cols-2 gap-3">
-                  {["C#","D#","F#","G#","A#"].map(note=>{
-                    const hex=NC[note];
-                    return(
-                      <div key={note} className="rounded-xl p-4 border cursor-pointer"
-                        style={{background:hex+"11",borderColor:hex+"44"}}
-                        onClick={()=>playTone(note,4,0.7)}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full" style={{background:`linear-gradient(135deg,${hex},${hex}88)`}}/>
-                          <div>
-                            <p className="font-bold" style={{color:hex}}>{note} / {ENHARMONIC[note]}</p>
-                            <p className="text-xs font-mono text-gray-600">{hex}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {tab==="colors"&&<ColoresTab/>}
 
           </div>
         </div>
