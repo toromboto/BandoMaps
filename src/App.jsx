@@ -1384,7 +1384,7 @@ function calcAcorde(ac,romano){
       if(seen.has(pc)) return; seen.add(pc);
       tones.push({...it,pc,esc,nombre:nombreLat(esc)});
     });
-    const tonesF=tones.map(t=>({...t,lab:romano?aRomano(t.lab):t.lab}));
+    const tonesF=tones.map(t=>({...t,raw:t.lab,lab:romano?aRomano(t.lab):t.lab}));
     const labelByPc={}; tonesF.forEach(t=>{labelByPc[t.pc]=t.lab;});
     const partes=[];
     if(ac.seis) partes.push("6");
@@ -1488,35 +1488,96 @@ function ArmadorAcordes({ a, collapsible=true, children }){
   );
 }
 
-// Cuántos botones de cada mano dan cada nota del acorde (abriendo y cerrando).
-function DisponibilidadAcorde({ tones, leftBtns, rightBtns, bellows }){
-  const cnt=(btns,fu,pc)=>btns.filter(b=>{ const n=fu==="abre"?b.abre:b.cierra; return (LAT[n]||n)===pc; }).length;
+// Voicing recomendado sobre el teclado real (alturas del CSV).
+// Mano izquierda: bajo (fundamental más grave) + 7ª justo encima + resto del acorde desde el Do3.
+// Mano derecha: las notas del acorde en orden ascendente desde el Do3; la inversión rota qué nota va abajo.
+function armarVoicing(btns, bellows, tones, mano, inv){
+  const items=itemsMano(btns,bellows), DO3=48;
+  const occ=(pc)=>{ const n=typeof pc==="number"?pc:noteIdx(pc); return items.filter(i=>i.pc===n).sort((a,b)=>a.midi-b.midi); };
+  const mk=(it,t,rol)=>({pc:it.pc,oct:it.oct,midi:it.midi,b:it.b.id,esc:t.esc,nombre:t.nombre,lab:t.lab,rol});
+  const out=[], faltan=[], es7=(t)=>["b7","7","bb7"].includes(t.raw);
+  const raiz=tones[0]; if(!raiz) return {notas:[],faltan:[]};
+  let piso=-1;
+  const poner=(lista,primeroDesde)=>{ let prev=-1; lista.forEach((t,idx)=>{
+      const c=occ(t.pc); const hit = idx===0 ? (c.find(i=>i.midi>=primeroDesde&&i.midi>piso)||c.find(i=>i.midi>piso)) : c.find(i=>i.midi>prev);
+      if(hit){ out.push(mk(hit,t,t.lab)); prev=hit.midi; } else faltan.push(t.nombre+" ("+t.lab+")"); }); };
+  if(mano==="izq"){
+    const r=occ(raiz.pc)[0];
+    if(r){ out.push(mk(r,raiz,"Bajo")); piso=r.midi; } else faltan.push(raiz.nombre+" (bajo)");
+    const s=tones.find(es7);
+    if(s){ const c=occ(s.pc).find(i=>i.midi>piso); if(c){ out.push(mk(c,s,"7ª")); piso=Math.max(piso,c.midi); } else faltan.push(s.nombre+" (7ª)"); }
+    let U=tones.filter(t=>t!==raiz&&!es7(t)); const k=U.length?inv%U.length:0; U=[...U.slice(k),...U.slice(0,k)];
+    poner(U,DO3);
+  } else {
+    let T=[...tones]; const k=T.length?inv%T.length:0; T=[...T.slice(k),...T.slice(0,k)];
+    poner(T,DO3);
+  }
+  return {notas:out,faltan};
+}
+const octLista=(items,pc)=>{ const n=typeof pc==="number"?pc:noteIdx(pc); const m={}; items.filter(i=>i.pc===n).forEach(i=>{ m[i.oct]=(m[i.oct]||0)+1; });
+  return Object.keys(m).map(Number).sort((a,b)=>a-b).map(o=>m[o]>1?`${o}×${m[o]}`:String(o)).join(" · "); };
+
+// Dónde está cada nota del acorde (por octava) y cómo armarlo
+function DisponibilidadAcorde({ tones, leftBtns, rightBtns, bellows, voz }){
   const cols=[["izq","abre","IZQ ▷",leftBtns],["izq","cierra","IZQ ◁",leftBtns],["der","abre","DER ▷",rightBtns],["der","cierra","DER ◁",rightBtns]];
+  const itemsDe={}; cols.forEach(c=>{ itemsDe[c[0]+c[1]]=itemsMano(c[3],c[1]); });
+  const sec={fontSize:10,letterSpacing:"0.14em",color:"#8a8a8a",textTransform:"uppercase",marginBottom:8,fontWeight:600,fontFamily:UI_FONT};
+  const peq=(on)=>uiPill(on,{padding:"4px 10px",fontSize:11});
   return(
-    <div className="mt-3 overflow-x-auto" style={{borderTop:"1px solid #2a2a2a",paddingTop:10}}>
-      <p style={{fontSize:10,letterSpacing:"0.14em",color:"#8a8a8a",textTransform:"uppercase",marginBottom:6}}>Dónde está cada nota (cantidad de botones)</p>
-      <table style={{borderCollapse:"collapse",fontSize:11,fontFamily:"monospace",width:"100%"}}>
-        <thead>
-          <tr>
+    <div className="mt-3" style={{borderTop:"1px solid #2a2a2a",paddingTop:10}}>
+      <p style={sec}>Dónde está cada nota (octavas disponibles)</p>
+      <div className="overflow-x-auto">
+        <table style={{borderCollapse:"collapse",fontSize:12,fontFamily:"monospace",width:"100%"}}>
+          <thead><tr>
             <th style={{textAlign:"left",padding:"3px 6px",color:"#8a8a8a",fontWeight:600}}>Nota</th>
             {cols.map(c=>(<th key={c[2]} style={{padding:"3px 6px",color:c[1]===bellows?"#e6e6e6":"#555",fontWeight:700}}>{c[2]}</th>))}
-          </tr>
-        </thead>
-        <tbody>
-          {tones.map(t=>(
-            <tr key={t.pc} style={{borderTop:"1px solid #1a1a1a"}}>
-              <td style={{padding:"4px 6px"}}>
-                <span style={{display:"inline-block",width:10,height:10,borderRadius:3,background:nc(t.pc),marginRight:6,verticalAlign:"middle"}}/>
-                <span style={{color:"#e6e6e6"}}>{t.nombre}</span> <span style={{color:"#8a8a8a"}}>{t.lab}</span>
-              </td>
-              {cols.map(c=>{ const n=cnt(c[3],c[1],t.pc); return(
-                <td key={c[2]} style={{textAlign:"center",padding:"4px 6px",color:n?(c[1]===bellows?"#e6e6e6":"#8a8a8a"):"#444"}}>{n||"—"}</td>
-              );})}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p style={{fontSize:10,color:"#555",marginTop:6,lineHeight:1.5}}>Columna clara = fuelle actual. Si una nota no aparece en una mano con este fuelle, probá la otra mano o el otro sentido del fuelle.</p>
+          </tr></thead>
+          <tbody>
+            {tones.map(t=>(
+              <tr key={t.pc} style={{borderTop:"1px solid #1a1a1a"}}>
+                <td style={{padding:"4px 6px",whiteSpace:"nowrap"}}><NotaDot note={t.esc} size={20}/> <span style={{color:"#8a8a8a",marginLeft:4}}>{t.lab}</span></td>
+                {cols.map(c=>{ const l=octLista(itemsDe[c[0]+c[1]],t.pc); return(
+                  <td key={c[2]} style={{textAlign:"center",padding:"4px 6px",color:l?(c[1]===bellows?"#e6e6e6":"#8a8a8a"):"#444"}}>{l||"—"}</td>
+                );})}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p style={{fontSize:10,color:"#555",margin:"6px 0 12px",lineHeight:1.5}}>Los números son las octavas donde existe esa nota (2×3 = dos teclas en la octava 3). Columna clara = fuelle actual.</p>
+
+      {voz && (<>
+        <p style={sec}>Cómo armarlo · voicing recomendado</p>
+        <div className="flex flex-wrap gap-1.5 mb-2 items-center">
+          <span style={{fontSize:11,color:"#8a8a8a",marginRight:4}}>Mano</span>
+          <button style={peq(voz.mano==="izq")} onClick={()=>{voz.setMano("izq");voz.setInv(0);}}>Izquierda</button>
+          <button style={peq(voz.mano==="der")} onClick={()=>{voz.setMano("der");voz.setInv(0);}}>Derecha</button>
+          <span style={{width:10}}/>
+          <span style={{fontSize:11,color:"#8a8a8a",marginRight:4}}>Inversión</span>
+          {["Fundamental","1ª","2ª","3ª"].slice(0,Math.max(2,Math.min(4,tones.length))).map((l,i)=>(<button key={i} style={peq(voz.inv===i)} onClick={()=>voz.setInv(i)}>{l}</button>))}
+        </div>
+        {voz.res.notas.length>0 ? (
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:8}}>
+            {voz.res.notas.map((n,i)=>(
+              <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:58,padding:"6px 6px 5px",borderRadius:10,background:"#0e0e10",border:"1px solid #26262a"}}>
+                <NotaDot note={n.esc} size={30}/>
+                <span style={{fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:13,color:"#ececec"}}>{n.nombre}{n.oct}</span>
+                <span style={{fontSize:10,color:"#a0a0a6"}}>{n.rol}</span>
+                <span style={{fontSize:9,fontFamily:"monospace",color:"#6a6a70"}}>tecla {n.b}</span>
+              </div>
+            ))}
+          </div>
+        ) : <p style={{fontSize:12,color:"#c9a25a",margin:"0 0 8px"}}>Con este fuelle y esta mano no hay notas del acorde para armar.</p>}
+        {voz.res.faltan.length>0 && <p style={{fontSize:11.5,color:"#c9a25a",margin:"0 0 8px"}}>⚠ No hay en esta mano y con este fuelle: {voz.res.faltan.join(", ")}. Probá el otro sentido del fuelle, la otra mano u otra inversión.</p>}
+        <div className="flex flex-wrap gap-1.5 items-center">
+          <button style={uiPill(false,{padding:"6px 14px",borderColor:"#ececec",color:"#ececec"})} onClick={()=>voz.res.notas.forEach((n,i)=>setTimeout(()=>playBand(CHROMATIC[n.pc],n.oct),i*45))}>▶ Tocar este voicing</button>
+          <button style={uiPill(voz.solo,{padding:"6px 14px"})} onClick={()=>voz.setSolo(!voz.solo)}>{voz.solo?"Mostrando solo estas teclas":"Resaltar solo estas teclas"}</button>
+        </div>
+        <p style={{fontSize:10.5,color:"#6a6a70",margin:"8px 0 0",lineHeight:1.5}}>
+          {voz.mano==="izq" ? "Mano izquierda: el bajo es la fundamental más grave; la séptima va justo encima y el resto del acorde desde el Do3. Ejemplo: La menor = La1 (bajo) + Do3 + Mi3; con séptima, Sol2 entre el bajo y el Do3."
+                            : "Mano derecha: las notas del acorde de abajo hacia arriba desde el Do3. Cada inversión pone una nota distinta en la base."}
+        </p>
+      </>)}
     </div>
   );
 }
@@ -1573,7 +1634,7 @@ function ControlesDisposicion({d,isMobile}){
 
 function BandBtn({ btn, bellows, pressed, isHeard, onDown, onUp, draggable=false, onMove, oct=null, chordActive=false, chordLabel=null }) {
   const note  = bellows === "abre" ? btn.abre  : btn.cierra;
-  const color = bellows === "abre" ? btn.color_abre : btn.color_cierra;
+  const color = draggable ? (bellows === "abre" ? btn.color_abre : btn.color_cierra) : nc(LAT[note]||note);   // paleta real de las notas
   const isOn  = pressed.includes(btn.id);
   const isAct = isOn || isHeard;
 
@@ -1621,7 +1682,7 @@ function BandBtn({ btn, bellows, pressed, isHeard, onDown, onUp, draggable=false
         transition:"transform .08s,box-shadow .12s, opacity .2s",
         zIndex: isAct?20:(chordLabel?15:1),
         opacity: chordActive && !chordLabel && !isAct ? 0.25 : 1,
-        ...(chordLabel ? {border:"3px solid #ffffff", boxShadow:`0 0 0 3px #ffffff55, 0 0 16px ${color}`} : {}),
+        ...(chordLabel ? {background:`radial-gradient(circle at 36% 30%,${color}ff,${color}ee 55%,${color}bb)`,border:"3px solid #ffffff", boxShadow:`0 0 0 3px #ffffff55, 0 0 18px ${color}`} : {}),
       }}
     >
       {chordLabel && (
@@ -1681,7 +1742,7 @@ function MapaAlturas({ btns, bellows, titulo }){
 }
 
 function BandCanvas({ buttons, bellows, pressed, heardIds=[], onDown, onUp,
-  draggable=false, onMove, showGrid=false, onSelect=null, selected=null, octMap=null, maxWidth=null, maxScale=1, chordMap=null }) {
+  draggable=false, onMove, showGrid=false, onSelect=null, selected=null, octMap=null, maxWidth=null, maxScale=1, chordMap=null, chordIds=null }) {
 
   const W = Math.max(...buttons.map(b=>b.x)) + BTN_SIZE + 16;
   const H = Math.max(...buttons.map(b=>b.y)) + BTN_SIZE + 20;
@@ -1723,8 +1784,8 @@ function BandCanvas({ buttons, bellows, pressed, heardIds=[], onDown, onUp,
           onDown={e=>{onSelect&&onSelect(btn.id); onDown&&onDown(btn);}}
           onUp={onUp} draggable={draggable} onMove={onMove}
           oct={octMap ? octMap[btn.id] : null}
-          chordActive={!!chordMap}
-          chordLabel={chordMap ? (chordMap[(()=>{const n=bellows==="abre"?btn.abre:btn.cierra; return LAT[n]||n;})()] || null) : null}/>
+          chordActive={!!(chordIds||chordMap)}
+          chordLabel={chordIds ? (chordIds[btn.id]||null) : (chordMap ? (chordMap[(()=>{const n=bellows==="abre"?btn.abre:btn.cierra; return LAT[n]||n;})()] || null) : null)}/>
       ))}
     </div>
   );
@@ -2314,6 +2375,9 @@ function BandoneonTab() {
   const bothVisible = view==="ambas";
   const [romano,setRomano]=useRomanos();
   const acorde = useAcorde(romano,setRomano);
+  const [vozMano,setVozMano]=useState("izq"), [vozInv,setVozInv]=useState(0), [vozSolo,setVozSolo]=useState(false);
+  const vozRes = useMemo(()=> acorde.open && leftBtns.length ? armarVoicing(vozMano==="izq"?leftBtns:rightBtns, bellows, acorde.tones, vozMano, vozInv) : {notas:[],faltan:[]}, [acorde.open,acorde.key,acorde.romano,leftBtns,rightBtns,bellows,vozMano,vozInv]);
+  const chordIds = (acorde.open && vozSolo) ? Object.fromEntries(vozRes.notas.map(n=>[n.b,n.lab])) : null;
   const chordMap = acorde.open ? acorde.labelByPc : null;
   const canvasMaxWidth = wrapWidth; // cada teclado usa todo el ancho (apilados) para verse lo más grande posible
   const disp = useDisposicion();
@@ -2446,7 +2510,7 @@ function BandoneonTab() {
       </div>
 
       <ArmadorAcordes a={acorde}>
-        <DisponibilidadAcorde tones={acorde.tones} leftBtns={leftBtns} rightBtns={rightBtns} bellows={bellows}/>
+        <DisponibilidadAcorde tones={acorde.tones} leftBtns={leftBtns} rightBtns={rightBtns} bellows={bellows} voz={{mano:vozMano,setMano:setVozMano,inv:vozInv,setInv:setVozInv,solo:vozSolo,setSolo:setVozSolo,res:vozRes}}/>
       </ArmadorAcordes>
 
       {/* Canvas — se mide el ancho real disponible y se reparte entre los teclados
@@ -2468,7 +2532,7 @@ function BandoneonTab() {
             <BandCanvas buttons={leftBtns} bellows={bellows}
               pressed={pressedL} heardIds={heardIdsL}
               onDown={downL} onUp={upL} mobile={isMobile}
-              maxWidth={an.aL} maxScale={3.6} chordMap={chordMap}
+              maxWidth={an.aL} maxScale={3.6} chordMap={chordMap} chordIds={chordIds}
               octMap={bellows==="abre" ? OCT_L_OPEN : OCT_L_CLOSE}/>
           </div>
         )}
@@ -2480,7 +2544,7 @@ function BandoneonTab() {
             <BandCanvas buttons={rightBtns} bellows={bellows}
               pressed={pressedR} heardIds={heardIdsR}
               onDown={downR} onUp={upR} mobile={isMobile}
-              maxWidth={an.aR} maxScale={3.6} chordMap={chordMap}
+              maxWidth={an.aR} maxScale={3.6} chordMap={chordMap} chordIds={chordIds}
               octMap={bellows==="abre" ? OCT_R_OPEN : OCT_R_CLOSE}/>
           </div>
         )}
