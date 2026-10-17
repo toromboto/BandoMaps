@@ -3589,6 +3589,109 @@ function rutaEscala(btns, bellows, rootPc, ivs, dir, startIdx){
   return {route:r.route, missing:r.missing, tonics, items, startUsed:used};
 }
 
+// ─── EJERCICIOS: ARMAR EL TECLADO · PONER LAS NOTAS ───────────────────────────
+const FORMA_TOL = 26, FORMA_GRID = 14;
+// Empareja cada botón real con el círculo puesto más cercano (a menos de `tol` unidades, medio botón aprox.).
+// Lo que queda sin pareja son círculos que sobran y botones que faltan.
+function matchForma(real, pts, tol=FORMA_TOL){
+  const pares=[];
+  real.forEach(b=>pts.forEach(q=>{ const d=Math.hypot(b.x-q.x,b.y-q.y); if(d<=tol) pares.push({d,b:b.id,p:q.id}); }));
+  pares.sort((a,c)=>a.d-c.d);
+  const okB=new Set(), okP=new Set();
+  pares.forEach(q=>{ if(okB.has(q.b)||okP.has(q.p)) return; okB.add(q.b); okP.add(q.p); });
+  return {okB, okP, extra:pts.filter(q=>!okP.has(q.id)).length, falta:real.filter(b=>!okB.has(b.id))};
+}
+
+// Tablero vacío: se toca para poner círculos, se toca un círculo para sacarlo y se arrastra para acomodarlo.
+function FormaCanvas({ real, pts, onChange, checked, reveal, grid, maxWidth, maxScale=3 }){
+  const W = Math.max(...real.map(b=>b.x)) + BTN_SIZE + 16;
+  const H = Math.max(...real.map(b=>b.y)) + BTN_SIZE + 20;
+  const scale = Math.min(maxScale, (maxWidth||W)/W);
+  const scaledW = Math.ceil(W*scale), scaledH = Math.ceil(H*scale);
+  const boardRef = useRef(null), drag = useRef(null), suppress = useRef(false);
+  const R = BTN_SIZE/2;
+  const snapC = v => grid ? Math.round(v/FORMA_GRID)*FORMA_GRID : v;          // el imán actúa sobre el centro del círculo
+  const place = (cx,cy)=>({ x:Math.min(Math.max(snapC(cx)-R,0),W-BTN_SIZE-4), y:Math.min(Math.max(snapC(cy)-R,0),H-BTN_SIZE-4) });
+  const m = (checked||reveal) ? matchForma(real, pts) : null;
+
+  const onBoardClick = (e)=>{
+    if(e.target!==e.currentTarget) return;
+    const r=e.currentTarget.getBoundingClientRect(), kk=r.width/W;
+    const pos=place((e.clientX-r.left)/kk-2, (e.clientY-r.top)/kk-2);
+    if(pts.some(q=>Math.hypot(q.x-pos.x,q.y-pos.y)<BTN_SIZE*0.8)) return;      // no se montan unos sobre otros
+    onChange([...pts,{id:1+Math.max(0,...pts.map(q=>q.id)),...pos}]);
+  };
+  const down = (e,q)=>{ suppress.current=false; try{ e.currentTarget.setPointerCapture(e.pointerId); }catch(_){}
+    drag.current={id:q.id,sx:e.clientX,sy:e.clientY,ox:q.x,oy:q.y,moved:false}; };
+  const move = (e,q)=>{ const d=drag.current; if(!d||d.id!==q.id) return;
+    if(!d.moved && Math.hypot(e.clientX-d.sx,e.clientY-d.sy)<6) return;
+    d.moved=true;
+    const kk=boardRef.current.getBoundingClientRect().width/W;
+    const pos=place(d.ox+R+(e.clientX-d.sx)/kk, d.oy+R+(e.clientY-d.sy)/kk);
+    onChange(pts.map(z=>z.id===q.id?{...z,...pos}:z)); };
+  const up = ()=>{ if(drag.current){ if(drag.current.moved) suppress.current=true; drag.current=null; } };
+  const tap = (e,q)=>{ e.stopPropagation(); if(suppress.current){ suppress.current=false; return; } onChange(pts.filter(z=>z.id!==q.id)); };
+
+  const fondo = "linear-gradient(145deg,#1d1d1d,#101010)";
+  return (
+    <div style={{width:"100%",overflow:"hidden"}}>
+    <div style={{width:scaledW,height:scaledH,overflow:"hidden",flexShrink:0,margin:"0 auto"}}>
+      <div ref={boardRef} onClick={onBoardClick} style={{
+        position:"relative",width:W,height:H,boxSizing:"border-box",transform:`scale(${scale})`,transformOrigin:"top left",
+        background: grid ? `radial-gradient(circle, rgba(255,255,255,.17) 1.4px, transparent 1.9px) -${FORMA_GRID/2}px -${FORMA_GRID/2}px / ${FORMA_GRID}px ${FORMA_GRID}px, ${fondo}` : fondo,
+        border:"2px solid #3a3a3a",borderRadius:16,boxShadow:"0 8px 24px rgba(0,0,0,.7)",cursor:"crosshair"}}>
+        {reveal && m && m.falta.map(b=>(
+          <div key={"g"+b.id} style={{position:"absolute",left:b.x,top:b.y,width:BTN_SIZE,height:BTN_SIZE,borderRadius:"50%",border:"3px dashed #ffffffcc",pointerEvents:"none",boxShadow:"0 0 10px #ffffff55"}}/>
+        ))}
+        {pts.map(q=>{
+          const ok = m ? m.okP.has(q.id) : null;
+          return (
+            <button key={q.id} onPointerDown={e=>down(e,q)} onPointerMove={e=>move(e,q)} onPointerUp={up} onPointerCancel={up} onClick={e=>tap(e,q)}
+              style={{position:"absolute",left:q.x,top:q.y,width:BTN_SIZE,height:BTN_SIZE,borderRadius:"50%",padding:0,touchAction:"none",cursor:"grab",
+                background:"#2a2a2a",display:"flex",alignItems:"center",justifyContent:"center",
+                border: checked ? `3px solid ${ok?"#6b9c7c":"#b5564f"}` : "3px solid rgba(255,255,255,.6)",
+                boxShadow: checked ? (ok?"0 0 10px #6b9c7caa":"0 0 10px #b5564faa") : "none"}}>
+              {checked && <span style={{fontSize:14,color:"#fff",fontWeight:800}}>{ok?"✓":"✕"}</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+    </div>
+  );
+}
+
+// Ventana chica junto al círculo para decir qué nota es (y su octava, si el ejercicio la pide)
+function NotaPicker({ rect, actual, pedirOct, onSet, onErase, onClose, onListen }){
+  return (
+    <PopoverAnclado rect={rect} onClose={onClose} width={268} estimado={pedirOct?236:176}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:"7px 4px",marginBottom:pedirOct?8:10}}>
+        {CHROMATIC.map(n=>{
+          const sel = actual && actual.pc===n, t = CROM_SIMPLE[n];
+          return (
+            <button key={n} onClick={()=>onSet({pc:n})} style={{background:"none",border:"none",padding:0,cursor:"pointer",display:"flex",justifyContent:"center"}}>
+              <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:34,height:34,borderRadius:"50%",background:nc(n),color:"#fff",
+                fontWeight:800,fontFamily:UI_FONT,fontSize:t.length>3?9.5:t.length>2?11:13,textShadow:"0 1px 2px rgba(0,0,0,.9)",
+                border:sel?"3px solid #fff":"2px solid rgba(255,255,255,.25)"}}>{t}</span>
+            </button>
+          );
+        })}
+      </div>
+      {pedirOct && (
+        <div style={{display:"flex",gap:4,marginBottom:10,alignItems:"center"}}>
+          <span style={{...uiLabel,marginRight:4}}>Octava</span>
+          {[1,2,3,4,5,6].map(o=>(<button key={o} style={uiPill(actual&&actual.oct===o,{flex:1,padding:"5px 0"})} onClick={()=>onSet({oct:o})}>{o}</button>))}
+        </div>
+      )}
+      <div style={{display:"flex",gap:6}}>
+        {onListen && <button style={uiPill(false,{flex:1,padding:"5px"})} onClick={onListen}>▶ Escuchar</button>}
+        <button onClick={onErase} style={{flex:1,padding:"5px",borderRadius:8,border:"1px solid #5c2d2d",background:"#1f0a0a",color:"#d98f88",fontWeight:700,fontSize:11,cursor:"pointer"}}>🗑 Borrar</button>
+        <button onClick={onClose} style={{flex:1,padding:"5px",borderRadius:8,border:"1px solid #2a2a2a",background:"transparent",color:"#8a8a8a",fontSize:11,cursor:"pointer"}}>Cerrar</button>
+      </div>
+    </PopoverAnclado>
+  );
+}
+
 function EntrenadorTab({preset}={}){
   const [leftBtns, setLeftBtns]   = useState([]);
   const [rightBtns, setRightBtns] = useState([]);
@@ -3603,9 +3706,16 @@ function EntrenadorTab({preset}={}){
   const [modo, setModo]       = useState("colores");   // "colores" | "acordes"
   const [chordSel, setChordSel] = useState({});         // `${id}|${bellows}` -> true
   const [reveal, setReveal]     = useState(false);
+  const [formaPts, setFormaPts] = useState({L:[],R:[]});   // círculos puestos de memoria (ejercicio "Armar el teclado")
+  const [formaGrid, setFormaGrid] = useState(true);
+  const [notaGuess, setNotaGuess] = useState({});          // `${id}|${bellows}` -> {pc, oct}   (ejercicio "Poner las notas")
+  const [notaPicker, setNotaPicker] = useState(null);
+  const [pedirOct, setPedirOct]   = useState(false);
   const [romano,setRomano]=useRomanos();
   const acorde = useAcorde(romano,setRomano);
   useEffect(()=>{ setChecked(false); setReveal(false); },[acorde.key, modo]);
+  useEffect(()=>{ setNotaPicker(null); },[modo,bellows,view]);
+  useEffect(()=>{ if(modo==="notas"){ setChecked(false); setReveal(false); } },[bellows,pedirOct]);
   // — Escalas —
   const [escRoot,setEscRoot]=useState("C"), [escTipo,setEscTipo]=useState("mayor"), [escMano,setEscMano]=useState("der");
   const [escDir,setEscDir]=useState("sube"), [escStart,setEscStart]=useState(-1), [escModo,setEscModo]=useState("ver");
@@ -3659,6 +3769,7 @@ function EntrenadorTab({preset}={}){
   };
 
   const allButtons = useMemo(()=>[...leftBtns, ...rightBtns],[leftBtns,rightBtns]);
+  const vis = [...(view!=="derecha"?leftBtns:[]), ...(view!=="izquierda"?rightBtns:[])];   // botones de las manos que se están viendo
   const pcOf = (btn)=>{ const n = bellows==="abre" ? btn.abre : btn.cierra; return LAT[n]||n; };
   const isSel = (btn)=>!!chordSel[keyOf(btn.id)];
   const chordLabelOf = (btn)=>acorde.labelByPc[pcOf(btn)]||null;
@@ -3724,13 +3835,51 @@ function EntrenadorTab({preset}={}){
     if(esProx) return {bg:"#1a1a1a", border:"3px dashed #fff", glow:"0 0 10px #ffffff88", content:null};
     return {bg:"#1a1a1a", border:"3px solid #555", glow:"none", content:null};
   };
-  const scaleProps = modo==="escalas" ? { stateOf:escStateOf } : null;
-  const tapBtn = (btn, rect)=> modo==="acordes" ? toggleSel(btn) : modo==="escalas" ? escTap(btn, rect) : openPicker(btn, rect);
+  // — Ejercicio "Poner las notas": círculos vacíos y se le dice a cada uno qué nota es —
+  const guessCompleto = (g)=> !!(g && g.pc && (!pedirOct || g.oct));
+  const guessOk = (b)=>{ const g=notaGuess[keyOf(b.id)], it=itemDe(b); return guessCompleto(g) && g.pc===CHROMATIC[it.pc] && (!pedirOct || g.oct===it.oct); };
+  const setNota = (patch)=>{
+    const k = keyOf(notaPicker.btn.id), nuevo = {...(notaGuess[k]||{}), ...patch};
+    setNotaGuess(g=>({...g,[k]:nuevo})); setChecked(false);
+    if(!pedirOct || (nuevo.pc && nuevo.oct)) setNotaPicker(null);
+  };
+  const borrarNota = ()=>{ const k=keyOf(notaPicker.btn.id); setNotaGuess(g=>{ const n={...g}; delete n[k]; return n; }); setChecked(false); setNotaPicker(null); };
+  const notaStateOf = (btn)=>{
+    const g = notaGuess[keyOf(btn.id)], it = itemDe(btn), real = CHROMATIC[it.pc];
+    const act = !!(notaPicker && notaPicker.btn.id===btn.id);
+    const lab = (pc,oct)=> CROM_SIMPLE[pc] + (pedirOct && oct ? oct : "");
+    const dot = (t,sub)=> <span style={{display:"flex",flexDirection:"column",alignItems:"center",lineHeight:1.05,color:"#fff",textShadow:"0 1px 3px rgba(0,0,0,.95)"}}>
+      <b style={{fontSize:t.length>4?9.5:t.length>3?11:13}}>{t}</b>{sub?<span style={{fontSize:8.5,fontWeight:800,fontFamily:"monospace"}}>{sub}</span>:null}</span>;
+    if(!g || !g.pc){
+      if(reveal) return {bg:nc(real)+"55", border:`2px dashed ${nc(real)}`, glow:"none", content:<span style={{fontSize:10,fontWeight:700,color:"#ddd",fontFamily:"monospace"}}>{lab(real,it.oct)}</span>};
+      return {bg:"#1a1a1a", border:act?"3px solid #fff":"3px solid #555", glow:act?"0 0 0 4px #e6e6e6":"none", content:null};
+    }
+    const col = nc(g.pc);
+    if(checked){
+      const ok = guessOk(btn);
+      return ok ? {bg:col, border:"3px solid #6b9c7c", glow:`0 0 10px ${col}99`, content:dot(lab(g.pc,g.oct),"✓")}
+                : {bg:col, border:"3px solid #b5564f", glow:"0 0 10px #b5564faa", content:dot(lab(g.pc,g.oct),"→ "+lab(real,it.oct))};
+    }
+    return {bg:col, border:act?"3px solid #fff":"3px solid rgba(255,255,255,.5)", glow:act?"0 0 0 4px #e6e6e6":`0 0 10px ${col}99`, content:dot(lab(g.pc,g.oct))};
+  };
+  const notaPuestas = vis.filter(b=>guessCompleto(notaGuess[keyOf(b.id)]));
+  const notaBien = notaPuestas.filter(guessOk);
+  // — Ejercicio "Armar el teclado" —
+  const setFormaH = (h,lista)=>{ setFormaPts(f=>({...f,[h]:lista})); setChecked(false); };
+  const formaStat = (modo==="forma") ? [["L",leftBtns,view!=="derecha"],["R",rightBtns,view!=="izquierda"]].filter(x=>x[2]).map(([h,real])=>({h,real,m:matchForma(real,formaPts[h]),n:formaPts[h].length})) : [];
+  const formaBien = formaStat.reduce((a,x)=>a+x.m.okB.size,0), formaTot = formaStat.reduce((a,x)=>a+x.real.length,0);
+  const formaExtra = formaStat.reduce((a,x)=>a+x.m.extra,0), formaFalta = formaStat.reduce((a,x)=>a+x.m.falta.length,0);
+  const formaPuestos = formaStat.reduce((a,x)=>a+x.n,0);
+
+  const scaleProps = modo==="escalas" ? { stateOf:escStateOf } : modo==="notas" ? { stateOf:notaStateOf } : null;
+  const tapBtn = (btn, rect)=> modo==="acordes" ? toggleSel(btn) : modo==="escalas" ? escTap(btn, rect) : modo==="notas" ? setNotaPicker({btn,rect}) : openPicker(btn, rect);
   const painted = allButtons.filter(b=>guesses[keyOf(b.id)]);
   const correctos = painted.filter(b=>guesses[keyOf(b.id)]===correctOf(b));
 
   const reiniciarFuelle = ()=>{
     if(modo==="escalas"){ setProg({i:1,err:0,hint:false,wrong:null}); return; }
+    if(modo==="forma"){ setFormaPts(f=>({L:view!=="derecha"?[]:f.L, R:view!=="izquierda"?[]:f.R})); setChecked(false); setReveal(false); return; }
+    if(modo==="notas"){ setNotaGuess(g=>{ const n={...g}; vis.forEach(b=>delete n[keyOf(b.id)]); return n; }); setChecked(false); setReveal(false); setNotaPicker(null); return; }
     if(modo==="acordes"){
       setChordSel(s=>{ const n={...s}; allButtons.forEach(b=>delete n[keyOf(b.id)]); return n; });
       setChecked(false); setReveal(false);
@@ -3788,16 +3937,18 @@ function EntrenadorTab({preset}={}){
     <div style={{fontFamily:UI_FONT}}>
       <div className="mb-4">
         <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>
-          🎓 Entrenador — Pintá el teclado
+          🎓 Entrenador — {modo==="forma"?"Armá el teclado":modo==="notas"?"Poné las notas":"Pintá el teclado"}
         </h2>
         <p className="text-xs text-gray-500">
-          Tocá cada botón y elegí, de memoria, el color que le corresponde. Después tocá "Corregir" para ver qué acertaste.
+          {modo==="forma" ? "Reconstruí de memoria la forma de cada teclado, con círculos vacíos. Después tocá \"Corregir\"."
+            : modo==="notas" ? "Sobre el teclado con los círculos vacíos, decí qué nota corresponde a cada botón, abriendo o cerrando. Después tocá \"Corregir\"."
+            : "Tocá cada botón y elegí, de memoria, el color que le corresponde. Después tocá \"Corregir\" para ver qué acertaste."}
         </p>
       </div>
 
       {/* Modo del ejercicio */}
-      <div style={{display:"flex",background:"#121212",border:"1.5px solid #2a2a2a",borderRadius:10,padding:3,gap:2,marginBottom:10,width:"fit-content"}}>
-        {[["colores","🎨 Pintar colores"],["acordes","🎼 Armar acordes"],["escalas","🎶 Escalas"]].map(([m,l])=>(
+      <div style={{display:"flex",flexWrap:"wrap",background:"#121212",border:"1.5px solid #2a2a2a",borderRadius:10,padding:3,gap:2,marginBottom:10,width:"fit-content",maxWidth:"100%"}}>
+        {[["colores","🎨 Pintar colores"],["acordes","🎼 Armar acordes"],["escalas","🎶 Escalas"],["forma","◯ Armar el teclado"],["notas","♪ Poner las notas"]].map(([m,l])=>(
           <button key={m} style={{...pill(modo===m),padding:"6px 14px",fontSize:11}} onClick={()=>setModo(m)}>{l}</button>
         ))}
       </div>
@@ -3845,6 +3996,22 @@ function EntrenadorTab({preset}={}){
         </div>
       )}
 
+      {modo==="forma" && (
+        <div className="rounded-xl mb-3" style={{background:"#121212",border:"1px solid #2a2a2a",padding:"12px 14px"}}>
+          <p className="text-xs text-gray-500 mb-3">Tocá el tablero para poner un círculo donde creas que va un botón. Tocá un círculo para sacarlo y arrastralo para acomodarlo. Hacelo con la mano izquierda, la derecha o las dos. Al corregir, se acepta un margen de más o menos medio botón: <b>verde</b> = bien ubicado, <b>rojo</b> = sobra; el marcador te dice cuántos faltan. Con <b>Ver respuesta</b> aparecen, con línea punteada, los que te faltan.</p>
+          <p style={uiLabel}>Ayuda</p>
+          <div className="flex gap-1.5 mt-2">{[[true,"Cuadrícula con imán"],[false,"Libre"]].map(([v,l])=>(<button key={String(v)} style={uiPill(formaGrid===v)} onClick={()=>setFormaGrid(v)}>{l}</button>))}</div>
+        </div>
+      )}
+
+      {modo==="notas" && (
+        <div className="rounded-xl mb-3" style={{background:"#121212",border:"1px solid #2a2a2a",padding:"12px 14px"}}>
+          <p className="text-xs text-gray-500 mb-3">Tocá un círculo y elegí qué nota es; al elegirla, el círculo toma su color. Usá <b>Abre / Cierra</b> para practicar cada sentido del fuelle. Después tocá "Corregir": en cada error aparece la nota correcta, y en la ventana del círculo podés escucharla.</p>
+          <p style={uiLabel}>Qué se pide</p>
+          <div className="flex gap-1.5 mt-2">{[[false,"Solo la nota"],[true,"Nota y octava"]].map(([v,l])=>(<button key={String(v)} style={uiPill(pedirOct===v)} onClick={()=>setPedirOct(v)}>{l}</button>))}</div>
+        </div>
+      )}
+
       {modo==="acordes" && (
         <>
           <p className="text-xs text-gray-500 mb-2">
@@ -3856,11 +4023,11 @@ function EntrenadorTab({preset}={}){
 
       {/* Controles */}
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10,alignItems:"center"}}>
-        <div style={{display:"flex",background:"#121212",border:"1.5px solid #2a2a2a",borderRadius:10,padding:3,gap:2}}>
+        {modo!=="forma" && <div style={{display:"flex",background:"#121212",border:"1.5px solid #2a2a2a",borderRadius:10,padding:3,gap:2}}>
           {[["abre","▷ Abre"],["cierra","◁ Cierra"]].map(([b,l])=>(
             <button key={b} style={pill(bellows===b)} onClick={()=>setBellows(b)}>{l}</button>
           ))}
-        </div>
+        </div>}
         <div style={{display:"flex",background:"#121212",border:"1.5px solid #333333",borderRadius:10,padding:3,gap:2}}>
           {[["ambas","Ambas"],["izquierda","IZQ"],["derecha","DER"]].map(([v,l])=>(
             <button key={v} style={pill(view===v,"blue")} onClick={()=>setView(v)}>{l}</button>
@@ -3868,7 +4035,7 @@ function EntrenadorTab({preset}={}){
         </div>
         <ControlesDisposicion d={disp} isMobile={isMobile}/>
         <div style={{marginLeft:"auto",display:"flex",gap:6}}>
-          {modo==="acordes" && (
+          {(modo==="acordes"||modo==="forma"||modo==="notas") && (
             <button onClick={()=>setReveal(r=>!r)} style={{padding:"6px 12px",borderRadius:9,border:"1px solid #e6e6e6",background:reveal?"#e6e6e6":"transparent",color:reveal?"#0a0a0a":"#e6e6e6",fontWeight:700,fontSize:10,cursor:"pointer"}}>
               👁 {reveal?"Ocultar respuesta":"Ver respuesta"}
             </button>
@@ -3884,7 +4051,20 @@ function EntrenadorTab({preset}={}){
 
       {/* Marcador */}
       <div style={{marginBottom:10,padding:"8px 12px",background:"#121212",border:"1px solid #333333",borderRadius:10,display:"flex",gap:16,flexWrap:"wrap",fontSize:11}}>
-        {modo==="escalas" ? (
+        {modo==="forma" ? (
+          <>
+            <span style={{color:"#8a8a8a"}}>Círculos puestos: <b style={{color:"#e6e6e6"}}>{formaPuestos}</b> de {formaTot}</span>
+            {checked && <span style={{color:"#8a8a8a"}}>Bien ubicados: <b style={{color:"#e6e6e6"}}>{formaBien}/{formaTot}</b></span>}
+            {checked && <span style={{color:"#8a8a8a"}}>Sobran: <b style={{color:formaExtra?"#d98f88":"#e6e6e6"}}>{formaExtra}</b></span>}
+            {checked && <span style={{color:"#8a8a8a"}}>Faltan: <b style={{color:formaFalta?"#d98f88":"#e6e6e6"}}>{formaFalta}</b></span>}
+          </>
+        ) : modo==="notas" ? (
+          <>
+            <span style={{color:"#8a8a8a"}}>Fuelle: <b style={{color:"#e6e6e6"}}>{bellows==="abre"?"abriendo":"cerrando"}</b></span>
+            <span style={{color:"#8a8a8a"}}>Con nota: <b style={{color:"#e6e6e6"}}>{notaPuestas.length}/{vis.length}</b></span>
+            {checked && <span style={{color:"#8a8a8a"}}>Correctas: <b style={{color:"#e6e6e6"}}>{notaBien.length}/{notaPuestas.length}</b></span>}
+          </>
+        ) : modo==="escalas" ? (
           <>
             <span style={{color:"#8a8a8a"}}>Escala: <b style={{color:"#e6e6e6"}}>{nombreLat(escRoot)} {escDef.nombre.toLowerCase()}</b></span>
             <span style={{color:"#8a8a8a"}}>Fuelle: <b style={{color:"#e6e6e6"}}>{bellows==="abre"?"abriendo":"cerrando"}</b></span>
@@ -3909,14 +4089,18 @@ function EntrenadorTab({preset}={}){
       <div ref={wrapRef} style={{display:"flex",flexDirection:an.fila?"row":(disp.invertir?"column-reverse":"column"),gap:an.gap,alignItems:an.fila?"flex-start":"stretch",paddingBottom:8}}>
         {(view==="ambas"||view==="izquierda")&&(
           <div style={{width: an.fila ? an.aL : "100%", flexShrink:0}}>
-            <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO IZQUIERDA · {leftBtns.length} botones</p>
-            <PaintCanvas buttons={leftBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aL} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null}/>
+            <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO IZQUIERDA · {modo==="forma" ? `${formaPts.L.length} círculos` : `${leftBtns.length} botones`}</p>
+            {modo==="forma"
+              ? <FormaCanvas real={leftBtns} pts={formaPts.L} onChange={(l)=>setFormaH("L",l)} checked={checked} reveal={reveal} grid={formaGrid} maxWidth={an.aL} maxScale={3.6}/>
+              : <PaintCanvas buttons={leftBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aL} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null}/>}
           </div>
         )}
         {(view==="ambas"||view==="derecha")&&(
           <div style={{width: an.fila ? an.aR : "100%", flexShrink:0}}>
-            <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO DERECHA · {rightBtns.length} botones</p>
-            <PaintCanvas buttons={rightBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aR} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null}/>
+            <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO DERECHA · {modo==="forma" ? `${formaPts.R.length} círculos` : `${rightBtns.length} botones`}</p>
+            {modo==="forma"
+              ? <FormaCanvas real={rightBtns} pts={formaPts.R} onChange={(l)=>setFormaH("R",l)} checked={checked} reveal={reveal} grid={formaGrid} maxWidth={an.aR} maxScale={3.6}/>
+              : <PaintCanvas buttons={rightBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aR} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null}/>}
           </div>
         )}
       </div>
@@ -3965,6 +4149,12 @@ function EntrenadorTab({preset}={}){
             </div>
           </PopoverAnclado>
         );
+      })()}
+
+      {modo==="notas" && notaPicker && (()=>{
+        const k=keyOf(notaPicker.btn.id), it=itemDe(notaPicker.btn);
+        return <NotaPicker rect={notaPicker.rect} actual={notaGuess[k]} pedirOct={pedirOct} onSet={setNota} onErase={borrarNota} onClose={()=>setNotaPicker(null)}
+          onListen={checked ? ()=>tocarItem(it) : null}/>;
       })()}
 
       {modo==="colores" && picker&&<HojaDeColor rect={picker.rect} actual={guesses[keyOf(picker.btn.id)]} onPick={pickColor} onErase={erase} onClose={closePicker}/>}
