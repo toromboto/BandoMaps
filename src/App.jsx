@@ -3590,7 +3590,8 @@ function rutaEscala(btns, bellows, rootPc, ivs, dir, startIdx){
 }
 
 // ─── EJERCICIOS: ARMAR EL TECLADO · PONER LAS NOTAS ───────────────────────────
-const FORMA_TOL = 26, FORMA_GRID = 14;
+const FORMA_TOL = 46, FORMA_GRID = 14;   // 46 ≈ un botón de margen (ver FORMA_NIVELES)
+const FORMA_NIVELES = [[46,"Flexible"],[32,"Normal"],[20,"Exigente"]];
 // Empareja cada botón real con el círculo puesto más cercano (a menos de `tol` unidades, medio botón aprox.).
 // Lo que queda sin pareja son círculos que sobran y botones que faltan.
 function matchForma(real, pts, tol=FORMA_TOL){
@@ -3603,7 +3604,7 @@ function matchForma(real, pts, tol=FORMA_TOL){
 }
 
 // Tablero vacío: se toca para poner círculos, se toca un círculo para sacarlo y se arrastra para acomodarlo.
-function FormaCanvas({ real, pts, onChange, checked, reveal, grid, maxWidth, maxScale=3 }){
+function FormaCanvas({ real, pts, onChange, checked, reveal, grid, tol=FORMA_TOL, maxWidth, maxScale=3 }){
   const W = Math.max(...real.map(b=>b.x)) + BTN_SIZE + 16;
   const H = Math.max(...real.map(b=>b.y)) + BTN_SIZE + 20;
   const scale = Math.min(maxScale, (maxWidth||W)/W);
@@ -3612,7 +3613,7 @@ function FormaCanvas({ real, pts, onChange, checked, reveal, grid, maxWidth, max
   const R = BTN_SIZE/2;
   const snapC = v => grid ? Math.round(v/FORMA_GRID)*FORMA_GRID : v;          // el imán actúa sobre el centro del círculo
   const place = (cx,cy)=>({ x:Math.min(Math.max(snapC(cx)-R,0),W-BTN_SIZE-4), y:Math.min(Math.max(snapC(cy)-R,0),H-BTN_SIZE-4) });
-  const m = (checked||reveal) ? matchForma(real, pts) : null;
+  const m = (checked||reveal) ? matchForma(real, pts, tol) : null;
 
   const onBoardClick = (e)=>{
     if(e.target!==e.currentTarget) return;
@@ -3708,6 +3709,7 @@ function EntrenadorTab({preset}={}){
   const [reveal, setReveal]     = useState(false);
   const [formaPts, setFormaPts] = useState({L:[],R:[]});   // círculos puestos de memoria (ejercicio "Armar el teclado")
   const [formaGrid, setFormaGrid] = useState(true);
+  const [formaTol, setFormaTol] = useState(FORMA_TOL);   // margen de error al corregir
   const [notaGuess, setNotaGuess] = useState({});          // `${id}|${bellows}` -> {pc, oct}   (ejercicio "Poner las notas")
   const [notaPicker, setNotaPicker] = useState(null);
   const [pedirOct, setPedirOct]   = useState(false);
@@ -3866,7 +3868,7 @@ function EntrenadorTab({preset}={}){
   const notaBien = notaPuestas.filter(guessOk);
   // — Ejercicio "Armar el teclado" —
   const setFormaH = (h,lista)=>{ setFormaPts(f=>({...f,[h]:lista})); setChecked(false); };
-  const formaStat = (modo==="forma") ? [["L",leftBtns,view!=="derecha"],["R",rightBtns,view!=="izquierda"]].filter(x=>x[2]).map(([h,real])=>({h,real,m:matchForma(real,formaPts[h]),n:formaPts[h].length})) : [];
+  const formaStat = (modo==="forma") ? [["L",leftBtns,view!=="derecha"],["R",rightBtns,view!=="izquierda"]].filter(x=>x[2]).map(([h,real])=>({h,real,m:matchForma(real,formaPts[h],formaTol),n:formaPts[h].length})) : [];
   const formaBien = formaStat.reduce((a,x)=>a+x.m.okB.size,0), formaTot = formaStat.reduce((a,x)=>a+x.real.length,0);
   const formaExtra = formaStat.reduce((a,x)=>a+x.m.extra,0), formaFalta = formaStat.reduce((a,x)=>a+x.m.falta.length,0);
   const formaPuestos = formaStat.reduce((a,x)=>a+x.n,0);
@@ -3998,9 +4000,11 @@ function EntrenadorTab({preset}={}){
 
       {modo==="forma" && (
         <div className="rounded-xl mb-3" style={{background:"#121212",border:"1px solid #2a2a2a",padding:"12px 14px"}}>
-          <p className="text-xs text-gray-500 mb-3">Tocá el tablero para poner un círculo donde creas que va un botón. Tocá un círculo para sacarlo y arrastralo para acomodarlo. Hacelo con la mano izquierda, la derecha o las dos. Al corregir, se acepta un margen de más o menos medio botón: <b>verde</b> = bien ubicado, <b>rojo</b> = sobra; el marcador te dice cuántos faltan. Con <b>Ver respuesta</b> aparecen, con línea punteada, los que te faltan.</p>
+          <p className="text-xs text-gray-500 mb-3">Tocá el tablero para poner un círculo donde creas que va un botón. Tocá un círculo para sacarlo y arrastralo para acomodarlo. Hacelo con la mano izquierda, la derecha o las dos. Al corregir, cada círculo cuenta como bien ubicado si queda cerca del botón que le toca (con el margen que elijas abajo; no hace falta que sea exacto): <b>verde</b> = bien ubicado, <b>rojo</b> = sobra; el marcador te dice cuántos faltan. Con <b>Ver respuesta</b> aparecen, con línea punteada, los que te faltan.</p>
           <p style={uiLabel}>Ayuda</p>
-          <div className="flex gap-1.5 mt-2">{[[true,"Cuadrícula con imán"],[false,"Libre"]].map(([v,l])=>(<button key={String(v)} style={uiPill(formaGrid===v)} onClick={()=>setFormaGrid(v)}>{l}</button>))}</div>
+          <div className="flex gap-1.5 mt-2 mb-3">{[[true,"Cuadrícula con imán"],[false,"Libre"]].map(([v,l])=>(<button key={String(v)} style={uiPill(formaGrid===v)} onClick={()=>setFormaGrid(v)}>{l}</button>))}</div>
+          <p style={uiLabel}>Margen al corregir</p>
+          <div className="flex gap-1.5 mt-2">{FORMA_NIVELES.map(([v,l])=>(<button key={v} style={uiPill(formaTol===v)} onClick={()=>{setFormaTol(v);}}>{l}</button>))}</div>
         </div>
       )}
 
@@ -4091,7 +4095,7 @@ function EntrenadorTab({preset}={}){
           <div style={{width: an.fila ? an.aL : "100%", flexShrink:0}}>
             <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO IZQUIERDA · {modo==="forma" ? `${formaPts.L.length} círculos` : `${leftBtns.length} botones`}</p>
             {modo==="forma"
-              ? <FormaCanvas real={leftBtns} pts={formaPts.L} onChange={(l)=>setFormaH("L",l)} checked={checked} reveal={reveal} grid={formaGrid} maxWidth={an.aL} maxScale={3.6}/>
+              ? <FormaCanvas real={leftBtns} pts={formaPts.L} onChange={(l)=>setFormaH("L",l)} checked={checked} reveal={reveal} grid={formaGrid} tol={formaTol} maxWidth={an.aL} maxScale={3.6}/>
               : <PaintCanvas buttons={leftBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aL} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null}/>}
           </div>
         )}
@@ -4099,7 +4103,7 @@ function EntrenadorTab({preset}={}){
           <div style={{width: an.fila ? an.aR : "100%", flexShrink:0}}>
             <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO DERECHA · {modo==="forma" ? `${formaPts.R.length} círculos` : `${rightBtns.length} botones`}</p>
             {modo==="forma"
-              ? <FormaCanvas real={rightBtns} pts={formaPts.R} onChange={(l)=>setFormaH("R",l)} checked={checked} reveal={reveal} grid={formaGrid} maxWidth={an.aR} maxScale={3.6}/>
+              ? <FormaCanvas real={rightBtns} pts={formaPts.R} onChange={(l)=>setFormaH("R",l)} checked={checked} reveal={reveal} grid={formaGrid} tol={formaTol} maxWidth={an.aR} maxScale={3.6}/>
               : <PaintCanvas buttons={rightBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aR} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null}/>}
           </div>
         )}
