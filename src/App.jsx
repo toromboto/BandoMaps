@@ -4535,7 +4535,96 @@ function CirculoQuintas(){
 // ═══════════════════════════════════════════════════════════════════════════
 const ORG_KEY = "harmonia_org";
 const idn = ()=>Math.random().toString(36).slice(2,8);
-const cargarOrg = ()=>{ try{ const j=JSON.parse(localStorage.getItem(ORG_KEY)||"null"); if(j&&Array.isArray(j.clases)) return {alumnos:j.alumnos||[],clases:j.clases,asign:j.asign||{},usuarios:j.usuarios||[]}; }catch(e){} return {alumnos:[],clases:[],asign:{},usuarios:[]}; };
+const cargarOrg = ()=>{ try{ const j=JSON.parse(localStorage.getItem(ORG_KEY)||"null"); if(j&&Array.isArray(j.clases)) return {alumnos:j.alumnos||[],clases:j.clases,asign:j.asign||{},usuarios:j.usuarios||[],registroUrl:j.registroUrl||""}; }catch(e){} return {alumnos:[],clases:[],asign:{},usuarios:[],registroUrl:""}; };
+
+// ─── REGISTRO DE INGRESOS (planilla de Google) ───────────────────────────────
+// El alumno avisa solo dos cosas: "ingreso" (abrió la app, una vez por sesión) y "tarea" (tocó Practicar).
+// No se envía qué ejercicio ni cuánto tiempo. El aviso va firmado con la sesión verificada (window.__TOKEN),
+// así que el script de la planilla sabe quién es sin fiarse de lo que diga el navegador.
+const REG_URL_RE = /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/;
+const REG_SES = "harmonia_reg_sesion";
+function registrar(tipo){
+  try{
+    const url=window.__ACCESO_URL, tok=window.__TOKEN;
+    if(!window.__ALUMNO || !tok || !url || !REG_URL_RE.test(url)) return;
+    fetch(url,{method:"POST",mode:"no-cors",keepalive:true,body:JSON.stringify({a:"reg",t:tipo,tok:tok})}).catch(()=>{});
+  }catch(e){}
+}
+const REG_CLAVE_KEY = "harmonia_reg_clave";   // la clave de lectura queda solo en el navegador del profesor (nunca va en clases.json)
+const diaLocal = (ms)=>{ const d=new Date(ms); return new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime(); };
+function haceCuanto(ms, ahora){
+  if(!ms) return "nunca";
+  const dias = Math.round((diaLocal(ahora)-diaLocal(ms))/86400000);
+  if(dias<=0) return "hoy"; if(dias===1) return "ayer"; if(dias<31) return `hace ${dias} días`;
+  const m=Math.floor(dias/30); return m===1 ? "hace 1 mes" : `hace ${m} meses`;
+}
+function PanelIngresos({org,guardar,card,peq}){
+  const [abierto,setAbierto]=useState(false);
+  const [clave,setClave]=useState(()=>{ try{ return localStorage.getItem(REG_CLAVE_KEY)||""; }catch(e){ return ""; } });
+  const [res,setRes]=useState(null), [cargando,setCargando]=useState(false), [err,setErr]=useState(""), [info,setInfo]=useState("");
+  const url=(org.registroUrl||"").trim(), urlOk=REG_URL_RE.test(url);
+  const actualizar=async()=>{
+    setErr(""); setCargando(true);
+    try{ try{ localStorage.setItem(REG_CLAVE_KEY,clave); }catch(e){}
+      setInfo("");
+      const r=await fetch(url,{method:"POST",body:JSON.stringify({a:"resumen",clave:clave}),cache:"no-store"}); const j=await r.json();
+      if(!j.ok) setErr(j.error==="clave" ? "La clave no coincide con la que pusiste en el script (propiedad CLAVE)." : j.error==="espera" ? "Demasiados intentos con clave equivocada. Esperá unos minutos." : "El registro respondió con un error."); else setRes(j);
+    }catch(e){ setErr("No pude leer el registro. Revisá la dirección y que la publicación esté como \"Cualquier persona\"."); }
+    setCargando(false); };
+  const filas = (()=>{ if(!res) return []; const por={}; (res.alumnos||[]).forEach(a=>{ por[String(a.u).toLowerCase()]=a; });
+    const nombres=[...org.alumnos]; [...(res.lista||[]).map(x=>x.u),...(res.alumnos||[]).map(a=>a.u)].forEach(u=>{ if(!nombres.some(n=>n.toLowerCase()===String(u).toLowerCase())) nombres.push(u); });
+    return nombres.map(n=>({n, bloq:(res.lista||[]).some(x=>x.u.toLowerCase()===n.toLowerCase()&&x.estado==="bloqueado"), a:por[n.toLowerCase()]||{ing:0,i7:0,i30:0,ult:0,tar:0,t7:0,ultT:0}})).sort((x,y)=>(y.a.ult-x.a.ult)||x.n.localeCompare(y.n)); })();
+  // Trae a la lista del Organizador los alumnos de la hoja "Alumnos" (sin claves)
+  const traerAlumnos=()=>{ const us=(res.lista||[]).map(x=>x.u); if(!us.length) return setInfo("La hoja Alumnos está vacía.");
+    const canon=(n)=>us.find(x=>x.toLowerCase()===n.toLowerCase())||n;
+    const alumnos=[...new Set([...org.alumnos.map(canon),...us])];
+    const asign={}; Object.entries(org.asign).forEach(([k,l])=>{ const c=canon(k); asign[c]=[...new Set([...(asign[c]||[]),...l])]; });
+    guardar({...org,alumnos,asign,usuarios:us}); setInfo(`Lista actualizada: ${us.length} alumno(s) de la planilla.`); };
+  const th={textAlign:"left",fontSize:10,letterSpacing:"0.1em",color:"#7c7c82",fontWeight:600,padding:"6px 8px",textTransform:"uppercase",whiteSpace:"nowrap"}, td={padding:"7px 8px",fontSize:12.5,borderTop:"1px solid #1c1c1f",whiteSpace:"nowrap"};
+  return(
+    <div style={card}>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        <b style={{fontSize:14}}>📊 Ingresos de los alumnos</b>
+        <button style={peq} onClick={()=>setAbierto(a=>!a)}>{abierto?"Ocultar":"Mostrar"}</button>
+        {!urlOk && <span style={{fontSize:11,color:"#c9a25a"}}>Sin configurar</span>}
+      </div>
+      {abierto && (
+        <div style={{marginTop:10}}>
+          <p style={{fontSize:11.5,color:"#8a8a8a",lineHeight:1.5,margin:"0 0 10px"}}>Cuenta cuántas veces entra cada alumno y cuántas veces abre una tarea con "Practicar". No registra qué ejercicio hace ni cuánto tiempo está. Los alumnos lo ven aclarado en "Mis tareas". Esta dirección y clave son las de tu planilla de Google (hojas Alumnos e Ingresos).</p>
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:10}}>
+            <label style={{fontSize:11,color:"#8a8a8a"}}>Dirección del registro (termina en /exec)
+              <input style={{...inpS,width:"100%",marginTop:4}} value={org.registroUrl||""} placeholder="https://script.google.com/macros/s/…/exec" onChange={e=>guardar({...org,registroUrl:e.target.value.trim()})}/></label>
+            {url && !urlOk && <span style={{fontSize:11,color:"#d98f88"}}>Esa dirección no parece la de una publicación de Apps Script (https://script.google.com/macros/s/…/exec).</span>}
+            <label style={{fontSize:11,color:"#8a8a8a"}}>Clave de lectura (la que pusiste en la planilla; solo se guarda en este navegador)
+              <input type="password" style={{...inpS,width:"100%",marginTop:4}} value={clave} autoComplete="off" onChange={e=>setClave(e.target.value)}/></label>
+            <div><button style={uiPill(true,{padding:"6px 14px",opacity:(urlOk&&clave)?1:.45})} disabled={!urlOk||!clave||cargando} onClick={actualizar}>{cargando?"Leyendo…":"↻ Actualizar"}</button></div>
+          </div>
+          {err && <p style={{fontSize:12,color:"#d98f88",margin:"0 0 8px"}}>{err}</p>}
+          {res && <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
+            <button style={peq} onClick={traerAlumnos}>⇩ Traer alumnos de la planilla al Organizador</button>
+            {info && <span style={{fontSize:11,color:"#8a8a8a"}}>{info}</span>}
+          </div>}
+          {res && (
+            <div style={{overflowX:"auto"}}>
+              <table style={{borderCollapse:"collapse",width:"100%"}}>
+                <thead><tr><th style={th}>Alumno</th><th style={th}>7 días</th><th style={th}>30 días</th><th style={th}>Total</th><th style={th}>Último ingreso</th><th style={th}>Tareas abiertas</th></tr></thead>
+                <tbody>{filas.map(f=>(
+                  <tr key={f.n}>
+                    <td style={{...td,fontWeight:700}}>{f.n}{f.bloq && <span style={{marginLeft:6,fontSize:10,fontWeight:600,color:"#d98f88"}}>bloqueado</span>}</td>
+                    <td style={td}>{f.a.i7}</td><td style={td}>{f.a.i30}</td><td style={td}>{f.a.ing}</td>
+                    <td style={{...td,color:f.a.ult?"#ececec":"#d98f88"}} title={f.a.ult?new Date(f.a.ult).toLocaleString():""}>{haceCuanto(f.a.ult,res.ahora||Date.now())}</td>
+                    <td style={td} title={f.a.ultT?("última: "+new Date(f.a.ultT).toLocaleString()):""}>{f.a.tar}{f.a.t7?` (${f.a.t7} esta semana)`:""}</td>
+                  </tr>))}</tbody>
+              </table>
+              {filas.length===0 && <p style={{fontSize:12,color:"#8a8a8a"}}>Todavía no hay ingresos registrados.</p>}
+              <p style={{fontSize:10.5,color:"#6a6a6a",margin:"8px 0 0",lineHeight:1.5}}>Un ingreso es una apertura de la app (se cuenta una vez por sesión del navegador). Es una referencia de uso, no una medida exacta de estudio.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 const EJ_NUEVO = {tipo:"escala",root:"C",escala:"mayor",mano:"der",dir:"sube",fuelle:"abre",modoEj:"ver",inicio:-1,dedos:[],ac:ACORDE_INI,texto:"",indic:""};
 const inpS = {background:"#0e0e10",border:"1px solid #2a2a2e",borderRadius:9,padding:"7px 10px",color:"#ececec",fontSize:13,fontFamily:UI_FONT,minWidth:0};
 const Sel = ({v,set,opts,w})=>(<select style={{...inpS,width:w}} value={v} onChange={e=>set(e.target.value)}>{opts.map(o=>(<option key={String(o[0])} value={o[0]}>{o[1]}</option>))}</select>);
@@ -4635,7 +4724,7 @@ function OrganizadorTab({onProbar}){
   const descargar=()=>{ const data={version:2,clases:org.clases,asignaciones:org.asign};
     const b=new Blob([JSON.stringify(data,null,1)],{type:"application/json"}), a=document.createElement("a"); a.href=URL.createObjectURL(b); a.download="clases.json"; document.body.appendChild(a); a.click(); a.remove(); };
   const cargar=async(file)=>{ if(!file) return; try{ const j=JSON.parse(await file.text()); if(!Array.isArray(j.clases)) throw 0;
-      const asign=j.asignaciones||{}; const alumnos=[...new Set([...org.alumnos,...Object.keys(asign)])]; guardar({alumnos,clases:j.clases,asign}); aviso("Clases cargadas."); }catch(e){ aviso("Ese archivo no es un clases.json válido."); } };
+      const asign=j.asignaciones||{}; const alumnos=[...new Set([...org.alumnos,...Object.keys(asign)])]; guardar({...org,alumnos,clases:j.clases,asign,registroUrl:org.registroUrl||""}); aviso("Clases cargadas."); }catch(e){ aviso("Ese archivo no es un clases.json válido."); } };
 
   const card={background:"#121212",border:"1px solid #2a2a2a",borderRadius:12,padding:"12px 14px",marginBottom:12};
   const peq={...uiPill(false),padding:"4px 10px",fontSize:11};
@@ -4645,6 +4734,8 @@ function OrganizadorTab({onProbar}){
         <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>Organizador de clases</h2>
         <p className="text-xs text-gray-500">Solo vos ves esta pestaña. Cada ejercicio de escala sale completo para el alumno: notas con su octava, frecuencia y dedos sugeridos.</p>
       </div>
+
+      <PanelIngresos org={org} guardar={guardar} card={card} peq={peq}/>
 
       <div style={{...card,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
         <button style={uiPill(true)} onClick={descargar}>⬇ Descargar clases.json</button>
@@ -4797,7 +4888,7 @@ function OrganizadorTab({onProbar}){
           </div>
         )}
       </details>
-      <p style={{fontSize:11,color:"#6a6a6a",lineHeight:1.5}}>Aviso: clases.json es un archivo público de tu sitio: quien tenga el enlace podría leerlo. No incluyas datos personales. Tampoco podés ver desde acá si el alumno hizo la tarea.</p>
+      <p style={{fontSize:11,color:"#6a6a6a",lineHeight:1.5}}>Aviso: clases.json es un archivo público de tu sitio: quien tenga el enlace podría leerlo. No incluyas datos personales. Desde acá no ves qué ejercicios hace el alumno; solo cuántas veces entra y abre una tarea (panel "Ingresos de los alumnos", si lo configurás).</p>
     </div>
   );
 }
@@ -4852,7 +4943,7 @@ function MisTareasTab({onPracticar}){
           ))}
         </div>
       ))}
-      <p style={{fontSize:11,color:"#6a6a6a"}}>Lo que marcás como hecho se guarda solo en este dispositivo; tu profesor no lo ve.</p>
+      <p style={{fontSize:11,color:"#6a6a6a"}}>Lo que marcás como hecho se guarda solo en este dispositivo; tu profesor no lo ve. Tu profesor sí puede ver cuántas veces entrás y cuántas veces abrís una tarea con "Practicar" (no qué ejercicio ni cuánto tiempo).</p>
     </div>
   );
 }
@@ -5127,7 +5218,7 @@ export default function HarmoniaApp(){
     {id:"modos",label:"Modos",icon:"≋"},
   ];
   const TABS=[...ESTUDIO.map(t=>({...t,grupo:"estudio"})),...HERRAMIENTAS.map(t=>({...t,grupo:"herr"}))];
-  const practicar=(e)=>{ setPreset({...e,nonce:Date.now()}); setTab("entrenador"); };
+  const practicar=(e)=>{ registrar("tarea"); setPreset({...e,nonce:Date.now()}); setTab("entrenador"); };
 
   return(
     <div className="min-h-screen text-gray-100 flex flex-col" style={{
