@@ -3627,29 +3627,28 @@ function rutaEscala(btns, bellows, rootPc, ivs, dir, startIdx){
 // ─── CAMINO DE LAS ESCALAS EN LOS DOS TECLADOS ────────────────────────────────
 const FIGURAS = [{id:"redonda",nombre:"Redonda",beats:4},{id:"blanca",nombre:"Blanca",beats:2},{id:"negra",nombre:"Negra",beats:1},{id:"corchea",nombre:"Corchea",beats:0.5},{id:"semicorchea",nombre:"Semicorchea",beats:0.25}];
 // Camino de una escala desde la tónica de la octava `octIni` hasta la tónica `nOct` octavas más arriba, para un sentido del fuelle.
-// Cada nota se busca en los dos teclados: se sigue en la misma mano mientras tenga la nota; si no la tiene, se pasa a la otra.
-// Si una nota no existe en ese sentido del fuelle, queda marcada como faltante (no se inventa nada). Las notas repetidas se ofrecen como alternativas.
+// CADA MANO muestra su propio camino: si una nota está en las dos manos se ve en las dos; si una mano no la tiene, queda sin marcar en esa mano.
+// Dentro de una misma mano, si una nota está en dos botones, se elige el más cercano a la nota anterior y el otro se ofrece como alternativa.
 function caminoEscala(leftBtns,rightBtns,bellows,rootPc,ivs,rootName,octIni,nOct,elige){
-  const todos=[...itemsMano(leftBtns,bellows).map(i=>({...i,hand:"L"})),...itemsMano(rightBtns,bellows).map(i=>({...i,hand:"R"}))];
   const nombres=buildScale(rootName,ivs), t0=12*(octIni+1)+rootPc, obj=[];
   for(let o=0;o<nOct;o++) ivs.forEach((iv,g)=>obj.push({midi:t0+12*o+iv,name:nombres[g],deg:g}));
   obj.push({midi:t0+12*nOct,name:nombres[0],deg:0});
   const dist=(a,b)=>Math.hypot(a.b.x-b.b.x,a.b.y-b.b.y);
-  const nodos=[], faltan=[]; let prev=null;
-  obj.forEach((ob,idx)=>{
-    const k=idx+1, cands=todos.filter(i=>i.midi===ob.midi);
-    if(!cands.length){ faltan.push({...ob,k}); nodos.push({...ob,k,falta:true}); return; }
-    let el=null; const forzado=elige && elige[bellows+":"+ob.midi];
-    if(forzado) el=cands.find(c=>c.b.id===forzado)||null;
-    if(!el){
-      const misma=prev?cands.filter(c=>c.hand===prev.hand):[];
-      if(prev && misma.length) el=misma.reduce((a,b)=>dist(prev,b)<dist(prev,a)?b:a);
-      else if(prev) el=cands[0];
-      else { const pref=ob.midi<60?"L":"R"; el=cands.find(c=>c.hand===pref)||cands[0]; }
-    }
-    nodos.push({...ob,k,item:el,alts:cands.filter(c=>c!==el)}); prev=el;
+  const manos={};
+  [["L",leftBtns],["R",rightBtns]].forEach(([h,btns])=>{
+    const items=itemsMano(btns,bellows).map(i=>({...i,hand:h}));
+    const nodos=[], faltan=[]; let prev=null;
+    obj.forEach((ob,idx)=>{
+      const k=idx+1, cands=items.filter(i=>i.midi===ob.midi);
+      if(!cands.length){ faltan.push({...ob,k}); nodos.push({...ob,k,falta:true}); return; }
+      let el=null; const forzado=elige && elige[bellows+":"+h+":"+ob.midi];
+      if(forzado) el=cands.find(c=>c.b.id===forzado)||null;
+      if(!el) el = prev ? cands.reduce((a,b)=>dist(prev,b)<dist(prev,a)?b:a) : cands[0];
+      nodos.push({...ob,k,item:el,alts:cands.filter(c=>c!==el)}); prev=el;
+    });
+    manos[h]={nodos,faltan};
   });
-  return {nodos,faltan};
+  return {obj,manos};
 }
 const octDeMidi=(m)=>Math.floor(m/12)-1;
 
@@ -3668,15 +3667,18 @@ function LeyendaCamino(){
     <div style={{margin:"0 0 12px",padding:"4px 12px",borderRadius:12,background:"#0e0e10",border:"1px solid #2a2a2e"}}>
       {fila(circ(nc("G"),"3px solid rgba(255,255,255,.55)",`0 0 10px ${nc("G")}99`,<><b style={{fontSize:13}}>Sol</b><span style={{fontSize:9,fontWeight:800,fontFamily:"monospace"}}>5</span></>),
         "Nota de la escala","Tiene el color de siempre. El nombre arriba y, abajo, el número de orden en que se toca (1 es la tónica).")}
-      {fila(flecha(false),"Flecha con línea llena","Hacia dónde sigue el camino cuando el fuelle está ABRIENDO.")}
-      {fila(flecha(true),"Flecha con línea punteada","Hacia dónde sigue el camino cuando el fuelle está CERRANDO.")}
+      {fila(flecha(false),"Flecha con línea llena","Hacia dónde sigue el camino en esa mano cuando el fuelle está ABRIENDO.")}
+      {fila(flecha(true),"Flecha con línea punteada","Hacia dónde sigue el camino en esa mano cuando el fuelle está CERRANDO.")}
+      {fila(<span style={{display:"inline-flex",gap:6}}>{circ(nc("C"),"3px solid rgba(255,255,255,.55)","",<b style={{fontSize:12}}>Do</b>)}{circ(nc("C"),"3px solid rgba(255,255,255,.55)","",<b style={{fontSize:12}}>Do</b>)}</span>,
+        "Las dos manos","Cada teclado muestra su propio camino. Si una nota está en las dos manos, se ve coloreada en las dos. Si una mano no la tiene, queda sin marcar en esa mano y abajo se avisa cuáles faltan.")}
       {fila(circ("#3a3a3a","3px dashed #9a9a9a","",<span style={{fontSize:10,fontWeight:800,color:"#cfcfcf"}}>5?</span>),
-        "Círculo gris con borde punteado","Esa misma nota está también en este otro botón. Tocalo para usar este botón en lugar del de color.")}
-      {fila(etq("→ der."),"Rótulo de cambio de mano","El camino sigue en la otra mano (\"→ der.\" o \"→ izq.\"). En el primer botón de la otra mano figura de dónde viene (\"← izq.\" o \"← der.\").")}
+        "Círculo gris con borde punteado","Esa misma nota está también en otro botón de esta misma mano. Tocalo para usar este botón en lugar del de color.")}
+      {fila(<span style={{fontSize:11,fontWeight:800,fontFamily:"monospace",color:"#fff",border:"2px solid rgba(255,255,255,.35)",background:nc("D"),borderRadius:9,padding:"3px 8px",textShadow:"0 1px 3px #000"}}>2 Re3 I·D</span>,
+        "Tira de notas","I = la nota está en la mano izquierda, D = en la derecha, I·D = en las dos. Tocarla la hace sonar.")}
       {fila(circ("#141414","3px solid #333","",null),"Círculo oscuro vacío","Botón que no forma parte de este camino. Tocalo y suena su nota.")}
       {fila(circ(nc("E"),"3px solid #fff","0 0 0 3px #fff, 0 0 14px #fff",<b style={{fontSize:13}}>Mi</b>),"Aro blanco brillante","La nota que está sonando en este momento, mientras escuchás el recorrido.")}
       {fila(<span style={{fontSize:12,color:"#6a6a6e",textDecoration:"line-through",border:"1px dashed #444",borderRadius:8,padding:"3px 8px"}}>✕ Si3</span>,"Nota tachada en la tira",
-        "Esa nota no existe en este sentido del fuelle. El camino sigue desde la próxima que sí esté; no se inventa ningún botón.")}
+        "Esa nota no existe en ninguna mano en este sentido del fuelle. No se inventa ningún botón.")}
       {fila(<span style={{fontSize:11,fontWeight:700,border:"1px solid #2a2a2a",borderRadius:9,padding:"5px 9px",color:"#ececec"}}>▶ Escuchar</span>,"Escuchar","Suena el camino con la figura (redonda, blanca, negra, corchea, semicorchea) y la velocidad que elijas.")}
     </div>
   );
@@ -3812,8 +3814,9 @@ function EntrenadorTab({preset}={}){
   const cam=useMemo(()=> modo==="camino" && leftBtns.length ? caminoEscala(leftBtns,rightBtns,bellows,noteIdx(camRoot),camDef.ivs,camRoot,camOct,camLong,camElige) : null,
                     [modo,leftBtns,rightBtns,bellows,camRoot,camTipo,camOct,camLong,camElige]);
   const camMapa=useMemo(()=>{ const m={}; if(!cam) return m;
-    cam.nodos.forEach(nd=>{ if(!nd.falta) m[nd.item.b.id]={t:"nodo",nd}; });
-    cam.nodos.forEach(nd=>{ if(!nd.falta) nd.alts.forEach(a=>{ if(!m[a.b.id]) m[a.b.id]={t:"alt",nd}; }); });
+    ["L","R"].forEach(h=>{ const nodos=cam.manos[h].nodos;
+      nodos.forEach(nd=>{ if(!nd.falta) m[nd.item.b.id]={t:"nodo",nd,hand:h}; });
+      nodos.forEach(nd=>{ if(!nd.falta) nd.alts.forEach(a=>{ if(!m[a.b.id]) m[a.b.id]={t:"alt",nd,hand:h}; }); }); });
     return m; },[cam]);
   const camParar=()=>{ camTimers.current.forEach(clearTimeout); camTimers.current=[]; setCamSuena(null); };
   useEffect(()=>{ camParar(); },[modo,bellows,camRoot,camTipo,camOct,camLong,camSent,camFig,camBpm,camElige]);
@@ -3981,42 +3984,39 @@ function EntrenadorTab({preset}={}){
   const formaExtra = formaStat.reduce((a,x)=>a+x.m.extra,0), formaFalta = formaStat.reduce((a,x)=>a+x.m.falta.length,0);
   const formaPuestos = formaStat.reduce((a,x)=>a+x.n,0);
 
-  // — Camino de las escalas: cómo se ve cada botón, flechas, rótulos y reproducción —
+  // — Camino de las escalas: cada mano muestra su propio camino —
   const camStateOf = (btn)=>{
     const e=camMapa[btn.id];
     if(!e) return {bg:"#141414",border:"3px solid #333",glow:"none",content:null};
     if(e.t==="alt") return {bg:"#3a3a3a",border:"3px dashed #9a9a9a",glow:"none",content:<span style={{fontSize:10,fontWeight:800,color:"#cfcfcf"}}>{e.nd.k}?</span>};
-    const col=nc(CHROMATIC[e.nd.item.pc]), suena=camSuena===btn.id, nom=nombreLat(e.nd.name);
+    const col=nc(CHROMATIC[e.nd.item.pc]), suena=!!camSuena && camSuena.includes(btn.id), nom=nombreLat(e.nd.name);
     return {bg:col,border:suena?"3px solid #fff":"3px solid rgba(255,255,255,.55)",glow:suena?"0 0 0 4px #fff, 0 0 18px #fff":`0 0 10px ${col}99`,
       content:<span style={{display:"flex",flexDirection:"column",alignItems:"center",lineHeight:1.05,color:"#fff",textShadow:"0 1px 3px rgba(0,0,0,.95)"}}>
         <b style={{fontSize:nom.length>3?10.5:13}}>{nom}</b><span style={{fontSize:9,fontWeight:800,fontFamily:"monospace"}}>{e.nd.k}</span></span>};
   };
   const camTap = (btn)=>{
     const e=camMapa[btn.id];
-    if(e && e.t==="alt"){ setCamElige(s=>({...s,[bellows+":"+e.nd.midi]:btn.id})); return; }
+    if(e && e.t==="alt"){ setCamElige(s=>({...s,[bellows+":"+e.hand+":"+e.nd.midi]:btn.id})); return; }
     tocarItem(itemDe(btn));
   };
   const camCentro = (b)=>({x:b.x+BTN_SIZE/2,y:b.y+BTN_SIZE/2});
-  const camFlechas = (h)=>{ if(!cam) return null; const out=[];
-    for(let i=0;i<cam.nodos.length-1;i++){ const a=cam.nodos[i], b=cam.nodos[i+1];
-      if(a.falta||b.falta||a.item.hand!==h||b.item.hand!==h) continue;
+  const camFlechas = (h)=>{ if(!cam) return null; const nodos=cam.manos[h].nodos, out=[];
+    for(let i=0;i<nodos.length-1;i++){ const a=nodos[i], b=nodos[i+1]; if(a.falta||b.falta) continue;
       out.push({a:camCentro(a.item.b),b:camCentro(b.item.b),dash:bellows==="cierra"}); }
     return out; };
-  const camRotulos = (h)=>{ if(!cam) return null; const out=[];
-    for(let i=0;i<cam.nodos.length-1;i++){ const a=cam.nodos[i], b=cam.nodos[i+1];
-      if(a.falta||b.falta||a.item.hand===b.item.hand) continue;
-      if(a.item.hand===h){ const c=camCentro(a.item.b); out.push({x:c.x,y:a.item.b.y,text:a.item.hand==="L"?"→ der.":"→ izq."}); }
-      if(b.item.hand===h){ const c=camCentro(b.item.b); out.push({x:c.x,y:b.item.b.y,text:b.item.hand==="R"?"← izq.":"← der."}); } }
-    return out; };
-  const camSecuencia = ()=>{ if(!cam) return []; const ok=cam.nodos.filter(n=>!n.falta);
+  // Una entrada por nota de la escala que esté en alguna mano (con los botones que la muestran)
+  const camPasos = ()=>{ if(!cam) return []; return cam.obj.map((ob,i)=>{
+    const l=cam.manos.L.nodos[i], r=cam.manos.R.nodos[i], hl=!l.falta, hr=!r.falta;
+    return {k:i+1,name:ob.name,midi:ob.midi,hl,hr,item:hl?l.item:hr?r.item:null,ids:[hl&&l.item.b.id,hr&&r.item.b.id].filter(Boolean)}; }); };
+  const camSecuencia = ()=>{ const ok=camPasos().filter(p=>p.item);
     return camSent==="baja" ? [...ok].reverse() : camSent==="ida" ? [...ok,...[...ok].reverse().slice(1)] : ok; };
   const camEscuchar = ()=>{
     camParar(); const sec=camSecuencia(); if(!sec.length) return;
     const fig=FIGURAS.find(f=>f.id===camFig), ms=fig.beats*60000/camBpm;
-    sec.forEach((nd,i)=>{ camTimers.current.push(setTimeout(()=>{ setCamSuena(nd.item.b.id); playBandDur(CHROMATIC[nd.item.pc],nd.item.oct,ms/1000*0.94); },i*ms)); });
+    sec.forEach((p,i)=>{ camTimers.current.push(setTimeout(()=>{ setCamSuena(p.ids); playBandDur(CHROMATIC[p.item.pc],p.item.oct,ms/1000*0.94); },i*ms)); });
     camTimers.current.push(setTimeout(()=>setCamSuena(null),sec.length*ms));
   };
-  const camNotaTxt = (nd)=> nombreLat(nd.name)+octDeMidi(nd.midi);
+  const camNotaTxt = (p)=> nombreLat(p.name)+octDeMidi(p.midi);
 
   const scaleProps = modo==="escalas" ? { stateOf:escStateOf } : modo==="notas" ? { stateOf:notaStateOf } : modo==="camino" ? { stateOf:camStateOf } : null;
   const tapBtn = (btn, rect)=> modo==="acordes" ? toggleSel(btn) : modo==="escalas" ? escTap(btn, rect) : modo==="notas" ? setNotaPicker({btn,rect}) : modo==="camino" ? camTap(btn) : openPicker(btn, rect);
@@ -4148,7 +4148,7 @@ function EntrenadorTab({preset}={}){
       {modo==="camino" && (
         <div className="rounded-xl mb-3" style={{background:"#121212",border:"1px solid #2a2a2a",padding:"12px 14px"}}>
           <div style={{display:"flex",gap:10,alignItems:"flex-start",justifyContent:"space-between",marginBottom:10}}>
-            <p className="text-xs text-gray-500" style={{margin:0}}>Elegí una escala y un tramo: se dibuja el camino nota por nota en los dos teclados. Con el botón Abre / Cierra cambiás el sentido del fuelle. Donde una mano se queda sin notas, el camino pasa a la otra.</p>
+            <p className="text-xs text-gray-500" style={{margin:0}}>Elegí una escala y un tramo: se dibuja el camino nota por nota en los dos teclados. Con el botón Abre / Cierra cambiás el sentido del fuelle. Cada mano muestra su propio camino: si una nota está en las dos, se ve en las dos.</p>
             <button style={uiPill(camLey,{padding:"6px 12px",flexShrink:0})} onClick={()=>setCamLey(v=>!v)}>❓ Cómo leerlo</button>
           </div>
           {camLey && <LeyendaCamino/>}
@@ -4171,24 +4171,25 @@ function EntrenadorTab({preset}={}){
             <span style={{fontSize:12,color:"#ececec",fontFamily:"monospace",minWidth:74}}>♩ = {camBpm}</span>
             <button style={uiPill(!!camSuena,{padding:"7px 16px"})} onClick={camSuena?camParar:camEscuchar}>{camSuena?"■ Detener":"▶ Escuchar"}</button>
           </div>
-          {cam && (
-            <>
-              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                {cam.nodos.map(nd=> nd.falta
-                  ? <span key={nd.k} style={{fontSize:11,color:"#6a6a6e",textDecoration:"line-through",border:"1px dashed #444",borderRadius:8,padding:"4px 8px"}}>✕ {camNotaTxt(nd)}</span>
-                  : <button key={nd.k} onClick={()=>tocarItem(nd.item)} title={nd.item.hand==="L"?"mano izquierda":"mano derecha"}
-                      style={{border:"2px solid rgba(255,255,255,.35)",background:nc(CHROMATIC[nd.item.pc]),color:"#fff",textShadow:"0 1px 3px #000",borderRadius:9,padding:"3px 8px",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"monospace"}}>
-                      {nd.k} {camNotaTxt(nd)} <span style={{opacity:.8,fontSize:9}}>{nd.item.hand==="L"?"I":"D"}</span></button>)}
-              </div>
-              {cam.faltan.length>0 && (
-                <p style={{fontSize:12,color:"#c9a25a",margin:"10px 0 0",lineHeight:1.5}}>
-                  {cam.faltan.length===cam.nodos.length
-                    ? `No hay botones para este tramo ${bellows==="abre"?"abriendo":"cerrando"}.`
-                    : `${bellows==="abre"?"Abriendo":"Cerrando"} no están: ${cam.faltan.map(camNotaTxt).join(", ")}. El camino sigue desde la próxima nota que sí está.`}
+          {cam && (()=>{
+            const pasos=camPasos(), fL=cam.manos.L.faltan, fR=cam.manos.R.faltan, nada=pasos.every(p=>!p.item);
+            const lista=(f)=>f.length===0 ? "completa" : "no tiene "+f.map(camNotaTxt).join(", ");
+            return (
+              <>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                  {pasos.map(p=> !p.item
+                    ? <span key={p.k} style={{fontSize:11,color:"#6a6a6e",textDecoration:"line-through",border:"1px dashed #444",borderRadius:8,padding:"4px 8px"}}>✕ {camNotaTxt(p)}</span>
+                    : <button key={p.k} onClick={()=>tocarItem(p.item)} title={p.hl&&p.hr?"en las dos manos":p.hl?"mano izquierda":"mano derecha"}
+                        style={{border:"2px solid rgba(255,255,255,.35)",background:nc(CHROMATIC[p.item.pc]),color:"#fff",textShadow:"0 1px 3px #000",borderRadius:9,padding:"3px 8px",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"monospace"}}>
+                        {p.k} {camNotaTxt(p)} <span style={{opacity:.8,fontSize:9}}>{p.hl&&p.hr?"I·D":p.hl?"I":"D"}</span></button>)}
+                </div>
+                <p style={{fontSize:12,color:(fL.length||fR.length)?"#c9a25a":"#8a8a8a",margin:"10px 0 0",lineHeight:1.5}}>
+                  {nada ? `No hay botones para este tramo ${bellows==="abre"?"abriendo":"cerrando"}.`
+                    : `${bellows==="abre"?"Abriendo":"Cerrando"} · Mano izquierda: ${lista(fL)}. Mano derecha: ${lista(fR)}.`}
                 </p>
-              )}
-            </>
-          )}
+              </>
+            );
+          })()}
         </div>
       )}
 
@@ -4253,7 +4254,7 @@ function EntrenadorTab({preset}={}){
           <>
             <span style={{color:"#8a8a8a"}}>Camino: <b style={{color:"#e6e6e6"}}>{nombreLat(camRoot)} {camDef.nombre}</b></span>
             <span style={{color:"#8a8a8a"}}>Fuelle: <b style={{color:"#e6e6e6"}}>{bellows==="abre"?"abriendo":"cerrando"}</b></span>
-            {cam && <span style={{color:"#8a8a8a"}}>Notas: <b style={{color:"#e6e6e6"}}>{cam.nodos.length-cam.faltan.length}/{cam.nodos.length}</b></span>}
+            {cam && <span style={{color:"#8a8a8a"}}>Izq.: <b style={{color:"#e6e6e6"}}>{cam.obj.length-cam.manos.L.faltan.length}/{cam.obj.length}</b> · Der.: <b style={{color:"#e6e6e6"}}>{cam.obj.length-cam.manos.R.faltan.length}/{cam.obj.length}</b></span>}
           </>
         ) : modo==="forma" ? (
           <>
@@ -4296,7 +4297,7 @@ function EntrenadorTab({preset}={}){
             <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO IZQUIERDA · {modo==="forma" ? `${formaPts.L.length} círculos` : `${leftBtns.length} botones`}</p>
             {modo==="forma"
               ? <FormaCanvas real={leftBtns} pts={formaPts.L} onChange={(l)=>setFormaH("L",l)} checked={checked} reveal={reveal} grid={formaGrid} tol={formaTol} maxWidth={an.aL} maxScale={3.6}/>
-              : <PaintCanvas buttons={leftBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aL} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null} flechas={modo==="camino"?camFlechas("L"):null} rotulos={modo==="camino"?camRotulos("L"):null}/>}
+              : <PaintCanvas buttons={leftBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aL} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null} flechas={modo==="camino"?camFlechas("L"):null}/>}
           </div>
         )}
         {(view==="ambas"||view==="derecha")&&(
@@ -4304,7 +4305,7 @@ function EntrenadorTab({preset}={}){
             <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO DERECHA · {modo==="forma" ? `${formaPts.R.length} círculos` : `${rightBtns.length} botones`}</p>
             {modo==="forma"
               ? <FormaCanvas real={rightBtns} pts={formaPts.R} onChange={(l)=>setFormaH("R",l)} checked={checked} reveal={reveal} grid={formaGrid} tol={formaTol} maxWidth={an.aR} maxScale={3.6}/>
-              : <PaintCanvas buttons={rightBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aR} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null} flechas={modo==="camino"?camFlechas("R"):null} rotulos={modo==="camino"?camRotulos("R"):null}/>}
+              : <PaintCanvas buttons={rightBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aR} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null} flechas={modo==="camino"?camFlechas("R"):null}/>}
           </div>
         )}
       </div>
