@@ -141,6 +141,26 @@ const playBand=(noteLat,octave)=>{
     }catch(e){}
   });
 };
+// Nota de bandoneón con duración controlada (para escuchar recorridos con una figura y una velocidad)
+const playBandDur=(noteLat,octave,dur)=>{
+  const eng=LAT[noteLat]||noteLat, d=Math.max(0.08,dur);
+  [1,2,3].forEach((h,i)=>{
+    try{
+      const ctx=getCtx();if(!ctx)return;
+      if(ctx.state==="suspended")ctx.resume();
+      const midi=(noteIdx(eng)>=0?60+noteIdx(eng):60)+(octave-4)*12;
+      const freq=440*Math.pow(2,(midi-69)/12)*h, t0=ctx.currentTime, v=[0.22,0.10,0.05][i];
+      const osc=ctx.createOscillator(),gain=ctx.createGain();
+      osc.connect(gain);gain.connect(ctx.destination);
+      osc.type="sawtooth";osc.frequency.value=freq;
+      gain.gain.setValueAtTime(0.0001,t0);
+      gain.gain.linearRampToValueAtTime(v,t0+0.015);
+      gain.gain.setValueAtTime(v*0.85,t0+Math.max(0.03,d-0.05));
+      gain.gain.exponentialRampToValueAtTime(0.001,t0+d+0.04);
+      osc.start(t0);osc.stop(t0+d+0.06);
+    }catch(e){}
+  });
+};
 const playChord=(notes)=>notes.forEach((n,i)=>setTimeout(()=>playTone(n,4,1.2),i*20));
 
 // ─── TEORÍA ───────────────────────────────────────────────────────────────────
@@ -3479,7 +3499,7 @@ function HojaDeColor({ rect, actual, onPick, onErase, onClose }){
 
 // Teclado en blanco, escalado para entrar siempre en el ancho disponible
 // (misma técnica de transform:scale ya usada en BandCanvas).
-function PaintCanvas({ buttons, guesses, keyOf, checked, correctOf, onTapButton, maxWidth, maxScale=3, activeId=null, chord=null, escala=null, rotulo=null }){
+function PaintCanvas({ buttons, guesses, keyOf, checked, correctOf, onTapButton, maxWidth, maxScale=3, activeId=null, chord=null, escala=null, rotulo=null, flechas=null, rotulos=null }){
   const W = Math.max(...buttons.map(b=>b.x)) + BTN_SIZE + 16;
   const H = Math.max(...buttons.map(b=>b.y)) + BTN_SIZE + 20;
   const target = maxWidth || W;
@@ -3538,6 +3558,21 @@ function PaintCanvas({ buttons, guesses, keyOf, checked, correctOf, onTapButton,
             </button>
           );
         })}
+        {flechas && flechas.length>0 && (
+          <svg width={W} height={H} style={{position:"absolute",left:0,top:0,pointerEvents:"none",overflow:"visible"}}>
+            <defs><marker id="camflecha" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.2" markerHeight="4.2" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#fff"/></marker></defs>
+            {flechas.map((f,i)=>{
+              const dx=f.b.x-f.a.x, dy=f.b.y-f.a.y, d=Math.hypot(dx,dy)||1, r=BTN_SIZE/2+2;
+              if(d<=2*r+6) return null;
+              return <line key={i} x1={f.a.x+dx/d*r} y1={f.a.y+dy/d*r} x2={f.b.x-dx/d*(r+1)} y2={f.b.y-dy/d*(r+1)}
+                stroke="#fff" strokeOpacity=".92" strokeWidth="3" strokeLinecap="round" strokeDasharray={f.dash?"7 6":undefined} markerEnd="url(#camflecha)"/>;
+            })}
+          </svg>
+        )}
+        {rotulos && rotulos.map((t,i)=>(
+          <div key={"r"+i} style={{position:"absolute",left:t.x,top:t.y,transform:"translate(-50%,-100%)",pointerEvents:"none",background:"#000d",border:"1px solid #ffffff66",color:"#fff",
+            fontSize:9,fontWeight:800,padding:"1px 6px",borderRadius:8,whiteSpace:"nowrap",fontFamily:"monospace"}}>{t.text}</div>
+        ))}
       </div>
     </div>
     </div>
@@ -3587,6 +3622,64 @@ function rutaEscala(btns, bellows, rootPc, ivs, dir, startIdx){
   used = Math.min(used, tonics.length-1);
   const r = build(tonics[used]);
   return {route:r.route, missing:r.missing, tonics, items, startUsed:used};
+}
+
+// ─── CAMINO DE LAS ESCALAS EN LOS DOS TECLADOS ────────────────────────────────
+const FIGURAS = [{id:"redonda",nombre:"Redonda",beats:4},{id:"blanca",nombre:"Blanca",beats:2},{id:"negra",nombre:"Negra",beats:1},{id:"corchea",nombre:"Corchea",beats:0.5},{id:"semicorchea",nombre:"Semicorchea",beats:0.25}];
+// Camino de una escala desde la tónica de la octava `octIni` hasta la tónica `nOct` octavas más arriba, para un sentido del fuelle.
+// Cada nota se busca en los dos teclados: se sigue en la misma mano mientras tenga la nota; si no la tiene, se pasa a la otra.
+// Si una nota no existe en ese sentido del fuelle, queda marcada como faltante (no se inventa nada). Las notas repetidas se ofrecen como alternativas.
+function caminoEscala(leftBtns,rightBtns,bellows,rootPc,ivs,rootName,octIni,nOct,elige){
+  const todos=[...itemsMano(leftBtns,bellows).map(i=>({...i,hand:"L"})),...itemsMano(rightBtns,bellows).map(i=>({...i,hand:"R"}))];
+  const nombres=buildScale(rootName,ivs), t0=12*(octIni+1)+rootPc, obj=[];
+  for(let o=0;o<nOct;o++) ivs.forEach((iv,g)=>obj.push({midi:t0+12*o+iv,name:nombres[g],deg:g}));
+  obj.push({midi:t0+12*nOct,name:nombres[0],deg:0});
+  const dist=(a,b)=>Math.hypot(a.b.x-b.b.x,a.b.y-b.b.y);
+  const nodos=[], faltan=[]; let prev=null;
+  obj.forEach((ob,idx)=>{
+    const k=idx+1, cands=todos.filter(i=>i.midi===ob.midi);
+    if(!cands.length){ faltan.push({...ob,k}); nodos.push({...ob,k,falta:true}); return; }
+    let el=null; const forzado=elige && elige[bellows+":"+ob.midi];
+    if(forzado) el=cands.find(c=>c.b.id===forzado)||null;
+    if(!el){
+      const misma=prev?cands.filter(c=>c.hand===prev.hand):[];
+      if(prev && misma.length) el=misma.reduce((a,b)=>dist(prev,b)<dist(prev,a)?b:a);
+      else if(prev) el=cands[0];
+      else { const pref=ob.midi<60?"L":"R"; el=cands.find(c=>c.hand===pref)||cands[0]; }
+    }
+    nodos.push({...ob,k,item:el,alts:cands.filter(c=>c!==el)}); prev=el;
+  });
+  return {nodos,faltan};
+}
+const octDeMidi=(m)=>Math.floor(m/12)-1;
+
+// Leyenda: qué significa cada señal del dibujo (se amplía cada vez que se suma una señal nueva)
+function LeyendaCamino(){
+  const fila=(icono,titulo,texto)=>(
+    <div style={{display:"flex",gap:12,alignItems:"center",padding:"8px 0",borderTop:"1px solid #1c1c1f"}}>
+      <div style={{width:92,flexShrink:0,display:"flex",justifyContent:"center",alignItems:"center"}}>{icono}</div>
+      <div style={{fontSize:12,lineHeight:1.45,minWidth:0}}><b style={{color:"#ececec"}}>{titulo}</b><br/><span style={{color:"#9a9a9f"}}>{texto}</span></div>
+    </div>);
+  const circ=(bg,borde,glow,hijo)=>(<span style={{display:"inline-flex",flexDirection:"column",alignItems:"center",justifyContent:"center",width:40,height:40,borderRadius:"50%",background:bg,border:borde,boxShadow:glow||"none",color:"#fff",lineHeight:1.05,textShadow:"0 1px 3px #000"}}>{hijo}</span>);
+  const flecha=(dash)=>(<svg width="84" height="18"><defs><marker id={"ley"+(dash?"d":"l")} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4.2" markerHeight="4.2" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#fff"/></marker></defs>
+    <line x1="4" y1="9" x2="78" y2="9" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeDasharray={dash?"7 6":undefined} markerEnd={`url(#ley${dash?"d":"l"})`}/></svg>);
+  const etq=(t)=>(<span style={{background:"#000d",border:"1px solid #ffffff66",color:"#fff",fontSize:10,fontWeight:800,padding:"1px 7px",borderRadius:8,fontFamily:"monospace"}}>{t}</span>);
+  return (
+    <div style={{margin:"0 0 12px",padding:"4px 12px",borderRadius:12,background:"#0e0e10",border:"1px solid #2a2a2e"}}>
+      {fila(circ(nc("G"),"3px solid rgba(255,255,255,.55)",`0 0 10px ${nc("G")}99`,<><b style={{fontSize:13}}>Sol</b><span style={{fontSize:9,fontWeight:800,fontFamily:"monospace"}}>5</span></>),
+        "Nota de la escala","Tiene el color de siempre. El nombre arriba y, abajo, el número de orden en que se toca (1 es la tónica).")}
+      {fila(flecha(false),"Flecha con línea llena","Hacia dónde sigue el camino cuando el fuelle está ABRIENDO.")}
+      {fila(flecha(true),"Flecha con línea punteada","Hacia dónde sigue el camino cuando el fuelle está CERRANDO.")}
+      {fila(circ("#3a3a3a","3px dashed #9a9a9a","",<span style={{fontSize:10,fontWeight:800,color:"#cfcfcf"}}>5?</span>),
+        "Círculo gris con borde punteado","Esa misma nota está también en este otro botón. Tocalo para usar este botón en lugar del de color.")}
+      {fila(etq("→ der."),"Rótulo de cambio de mano","El camino sigue en la otra mano (\"→ der.\" o \"→ izq.\"). En el primer botón de la otra mano figura de dónde viene (\"← izq.\" o \"← der.\").")}
+      {fila(circ("#141414","3px solid #333","",null),"Círculo oscuro vacío","Botón que no forma parte de este camino. Tocalo y suena su nota.")}
+      {fila(circ(nc("E"),"3px solid #fff","0 0 0 3px #fff, 0 0 14px #fff",<b style={{fontSize:13}}>Mi</b>),"Aro blanco brillante","La nota que está sonando en este momento, mientras escuchás el recorrido.")}
+      {fila(<span style={{fontSize:12,color:"#6a6a6e",textDecoration:"line-through",border:"1px dashed #444",borderRadius:8,padding:"3px 8px"}}>✕ Si3</span>,"Nota tachada en la tira",
+        "Esa nota no existe en este sentido del fuelle. El camino sigue desde la próxima que sí esté; no se inventa ningún botón.")}
+      {fila(<span style={{fontSize:11,fontWeight:700,border:"1px solid #2a2a2a",borderRadius:9,padding:"5px 9px",color:"#ececec"}}>▶ Escuchar</span>,"Escuchar","Suena el camino con la figura (redonda, blanca, negra, corchea, semicorchea) y la velocidad que elijas.")}
+    </div>
+  );
 }
 
 // ─── EJERCICIOS: ARMAR EL TECLADO · PONER LAS NOTAS ───────────────────────────
@@ -3704,12 +3797,27 @@ function EntrenadorTab({preset}={}){
   const [checked, setChecked] = useState(false);
   const [picker, setPicker]   = useState(null); // botón abierto en la hoja de color
   const [copied, setCopied]   = useState(false);
-  const [modo, setModo]       = useState("colores");   // "colores" | "acordes"
+  const [modo, setModo]       = useState("colores");   // "colores" | "acordes" | "escalas" | "forma" | "notas" | "camino"
   const [chordSel, setChordSel] = useState({});         // `${id}|${bellows}` -> true
   const [reveal, setReveal]     = useState(false);
   const [formaPts, setFormaPts] = useState({L:[],R:[]});   // círculos puestos de memoria (ejercicio "Armar el teclado")
   const [formaGrid, setFormaGrid] = useState(true);
   const [formaTol, setFormaTol] = useState(FORMA_TOL);   // margen de error al corregir
+  // — Camino de las escalas —
+  const [camRoot,setCamRoot]=useState("C"), [camTipo,setCamTipo]=useState("mayor"), [camOct,setCamOct]=useState(2), [camLong,setCamLong]=useState(1);
+  const [camFig,setCamFig]=useState("negra"), [camBpm,setCamBpm]=useState(80), [camSent,setCamSent]=useState("sube");
+  const [camElige,setCamElige]=useState({}), [camSuena,setCamSuena]=useState(null), [camLey,setCamLey]=useState(false);
+  const camTimers=useRef([]);
+  const camDef=ESCALAS_HERO.find(e=>e.id===camTipo);
+  const cam=useMemo(()=> modo==="camino" && leftBtns.length ? caminoEscala(leftBtns,rightBtns,bellows,noteIdx(camRoot),camDef.ivs,camRoot,camOct,camLong,camElige) : null,
+                    [modo,leftBtns,rightBtns,bellows,camRoot,camTipo,camOct,camLong,camElige]);
+  const camMapa=useMemo(()=>{ const m={}; if(!cam) return m;
+    cam.nodos.forEach(nd=>{ if(!nd.falta) m[nd.item.b.id]={t:"nodo",nd}; });
+    cam.nodos.forEach(nd=>{ if(!nd.falta) nd.alts.forEach(a=>{ if(!m[a.b.id]) m[a.b.id]={t:"alt",nd}; }); });
+    return m; },[cam]);
+  const camParar=()=>{ camTimers.current.forEach(clearTimeout); camTimers.current=[]; setCamSuena(null); };
+  useEffect(()=>{ camParar(); },[modo,bellows,camRoot,camTipo,camOct,camLong,camSent,camFig,camBpm,camElige]);
+  useEffect(()=>()=>{ camTimers.current.forEach(clearTimeout); },[]);
   const [notaGuess, setNotaGuess] = useState({});          // `${id}|${bellows}` -> {pc, oct}   (ejercicio "Poner las notas")
   const [notaPicker, setNotaPicker] = useState(null);
   const [pedirOct, setPedirOct]   = useState(false);
@@ -3873,13 +3981,51 @@ function EntrenadorTab({preset}={}){
   const formaExtra = formaStat.reduce((a,x)=>a+x.m.extra,0), formaFalta = formaStat.reduce((a,x)=>a+x.m.falta.length,0);
   const formaPuestos = formaStat.reduce((a,x)=>a+x.n,0);
 
-  const scaleProps = modo==="escalas" ? { stateOf:escStateOf } : modo==="notas" ? { stateOf:notaStateOf } : null;
-  const tapBtn = (btn, rect)=> modo==="acordes" ? toggleSel(btn) : modo==="escalas" ? escTap(btn, rect) : modo==="notas" ? setNotaPicker({btn,rect}) : openPicker(btn, rect);
+  // — Camino de las escalas: cómo se ve cada botón, flechas, rótulos y reproducción —
+  const camStateOf = (btn)=>{
+    const e=camMapa[btn.id];
+    if(!e) return {bg:"#141414",border:"3px solid #333",glow:"none",content:null};
+    if(e.t==="alt") return {bg:"#3a3a3a",border:"3px dashed #9a9a9a",glow:"none",content:<span style={{fontSize:10,fontWeight:800,color:"#cfcfcf"}}>{e.nd.k}?</span>};
+    const col=nc(CHROMATIC[e.nd.item.pc]), suena=camSuena===btn.id, nom=nombreLat(e.nd.name);
+    return {bg:col,border:suena?"3px solid #fff":"3px solid rgba(255,255,255,.55)",glow:suena?"0 0 0 4px #fff, 0 0 18px #fff":`0 0 10px ${col}99`,
+      content:<span style={{display:"flex",flexDirection:"column",alignItems:"center",lineHeight:1.05,color:"#fff",textShadow:"0 1px 3px rgba(0,0,0,.95)"}}>
+        <b style={{fontSize:nom.length>3?10.5:13}}>{nom}</b><span style={{fontSize:9,fontWeight:800,fontFamily:"monospace"}}>{e.nd.k}</span></span>};
+  };
+  const camTap = (btn)=>{
+    const e=camMapa[btn.id];
+    if(e && e.t==="alt"){ setCamElige(s=>({...s,[bellows+":"+e.nd.midi]:btn.id})); return; }
+    tocarItem(itemDe(btn));
+  };
+  const camCentro = (b)=>({x:b.x+BTN_SIZE/2,y:b.y+BTN_SIZE/2});
+  const camFlechas = (h)=>{ if(!cam) return null; const out=[];
+    for(let i=0;i<cam.nodos.length-1;i++){ const a=cam.nodos[i], b=cam.nodos[i+1];
+      if(a.falta||b.falta||a.item.hand!==h||b.item.hand!==h) continue;
+      out.push({a:camCentro(a.item.b),b:camCentro(b.item.b),dash:bellows==="cierra"}); }
+    return out; };
+  const camRotulos = (h)=>{ if(!cam) return null; const out=[];
+    for(let i=0;i<cam.nodos.length-1;i++){ const a=cam.nodos[i], b=cam.nodos[i+1];
+      if(a.falta||b.falta||a.item.hand===b.item.hand) continue;
+      if(a.item.hand===h){ const c=camCentro(a.item.b); out.push({x:c.x,y:a.item.b.y,text:a.item.hand==="L"?"→ der.":"→ izq."}); }
+      if(b.item.hand===h){ const c=camCentro(b.item.b); out.push({x:c.x,y:b.item.b.y,text:b.item.hand==="R"?"← izq.":"← der."}); } }
+    return out; };
+  const camSecuencia = ()=>{ if(!cam) return []; const ok=cam.nodos.filter(n=>!n.falta);
+    return camSent==="baja" ? [...ok].reverse() : camSent==="ida" ? [...ok,...[...ok].reverse().slice(1)] : ok; };
+  const camEscuchar = ()=>{
+    camParar(); const sec=camSecuencia(); if(!sec.length) return;
+    const fig=FIGURAS.find(f=>f.id===camFig), ms=fig.beats*60000/camBpm;
+    sec.forEach((nd,i)=>{ camTimers.current.push(setTimeout(()=>{ setCamSuena(nd.item.b.id); playBandDur(CHROMATIC[nd.item.pc],nd.item.oct,ms/1000*0.94); },i*ms)); });
+    camTimers.current.push(setTimeout(()=>setCamSuena(null),sec.length*ms));
+  };
+  const camNotaTxt = (nd)=> nombreLat(nd.name)+octDeMidi(nd.midi);
+
+  const scaleProps = modo==="escalas" ? { stateOf:escStateOf } : modo==="notas" ? { stateOf:notaStateOf } : modo==="camino" ? { stateOf:camStateOf } : null;
+  const tapBtn = (btn, rect)=> modo==="acordes" ? toggleSel(btn) : modo==="escalas" ? escTap(btn, rect) : modo==="notas" ? setNotaPicker({btn,rect}) : modo==="camino" ? camTap(btn) : openPicker(btn, rect);
   const painted = allButtons.filter(b=>guesses[keyOf(b.id)]);
   const correctos = painted.filter(b=>guesses[keyOf(b.id)]===correctOf(b));
 
   const reiniciarFuelle = ()=>{
     if(modo==="escalas"){ setProg({i:1,err:0,hint:false,wrong:null}); return; }
+    if(modo==="camino"){ camParar(); setCamElige({}); return; }
     if(modo==="forma"){ setFormaPts(f=>({L:view!=="derecha"?[]:f.L, R:view!=="izquierda"?[]:f.R})); setChecked(false); setReveal(false); return; }
     if(modo==="notas"){ setNotaGuess(g=>{ const n={...g}; vis.forEach(b=>delete n[keyOf(b.id)]); return n; }); setChecked(false); setReveal(false); setNotaPicker(null); return; }
     if(modo==="acordes"){
@@ -3939,10 +4085,11 @@ function EntrenadorTab({preset}={}){
     <div style={{fontFamily:UI_FONT}}>
       <div className="mb-4">
         <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>
-          🎓 Entrenador — {modo==="forma"?"Armá el teclado":modo==="notas"?"Poné las notas":"Pintá el teclado"}
+          🎓 Entrenador — {modo==="forma"?"Armá el teclado":modo==="notas"?"Poné las notas":modo==="camino"?"Camino de las escalas":"Pintá el teclado"}
         </h2>
         <p className="text-xs text-gray-500">
-          {modo==="forma" ? "Reconstruí de memoria la forma de cada teclado, con círculos vacíos. Después tocá \"Corregir\"."
+          {modo==="camino" ? "Mirá y escuchá el camino de cada escala sobre los dos teclados, abriendo o cerrando."
+            : modo==="forma" ? "Reconstruí de memoria la forma de cada teclado, con círculos vacíos. Después tocá \"Corregir\"."
             : modo==="notas" ? "Sobre el teclado con los círculos vacíos, decí qué nota corresponde a cada botón, abriendo o cerrando. Después tocá \"Corregir\"."
             : "Tocá cada botón y elegí, de memoria, el color que le corresponde. Después tocá \"Corregir\" para ver qué acertaste."}
         </p>
@@ -3950,7 +4097,7 @@ function EntrenadorTab({preset}={}){
 
       {/* Modo del ejercicio */}
       <div style={{display:"flex",flexWrap:"wrap",background:"#121212",border:"1.5px solid #2a2a2a",borderRadius:10,padding:3,gap:2,marginBottom:10,width:"fit-content",maxWidth:"100%"}}>
-        {[["colores","🎨 Pintar colores"],["acordes","🎼 Armar acordes"],["escalas","🎶 Escalas"],["forma","◯ Armar el teclado"],["notas","♪ Poner las notas"]].map(([m,l])=>(
+        {[["colores","🎨 Pintar colores"],["acordes","🎼 Armar acordes"],["escalas","🎶 Escalas"],["forma","◯ Armar el teclado"],["notas","♪ Poner las notas"],["camino","🧭 Camino de escalas"]].map(([m,l])=>(
           <button key={m} style={{...pill(modo===m),padding:"6px 14px",fontSize:11}} onClick={()=>setModo(m)}>{l}</button>
         ))}
       </div>
@@ -3995,6 +4142,53 @@ function EntrenadorTab({preset}={}){
             <p style={{fontSize:13,margin:"10px 0 0",color:prog.i>=escR.route.length&&escR.route.length?"#6b9c7c":"#cfcfcf"}}>
               {prog.i>=escR.route.length&&escR.route.length ? `¡Escala completa! Errores: ${prog.err}` : `Tocá la nota ${prog.i+1} de ${escR.route.length}${prog.err?` · errores: ${prog.err}`:""}`}
             </p>)}
+        </div>
+      )}
+
+      {modo==="camino" && (
+        <div className="rounded-xl mb-3" style={{background:"#121212",border:"1px solid #2a2a2a",padding:"12px 14px"}}>
+          <div style={{display:"flex",gap:10,alignItems:"flex-start",justifyContent:"space-between",marginBottom:10}}>
+            <p className="text-xs text-gray-500" style={{margin:0}}>Elegí una escala y un tramo: se dibuja el camino nota por nota en los dos teclados. Con el botón Abre / Cierra cambiás el sentido del fuelle. Donde una mano se queda sin notas, el camino pasa a la otra.</p>
+            <button style={uiPill(camLey,{padding:"6px 12px",flexShrink:0})} onClick={()=>setCamLey(v=>!v)}>❓ Cómo leerlo</button>
+          </div>
+          {camLey && <LeyendaCamino/>}
+          <p style={uiLabel}>Tónica</p>
+          <div className="flex flex-wrap gap-1.5 mb-3 mt-2">{ACORDE_RAICES.map(x=>(<button key={x} style={uiPill(camRoot===x)} onClick={()=>setCamRoot(x)}>{nombreLat(x)}</button>))}</div>
+          <p style={uiLabel}>Escala</p>
+          <div className="flex flex-wrap gap-1.5 mb-3 mt-2">{ESCALAS_HERO.map(e=>(<button key={e.id} style={uiPill(camTipo===e.id)} onClick={()=>setCamTipo(e.id)}>{e.corto}</button>))}</div>
+          <div className="flex flex-wrap gap-x-6 gap-y-3 mb-3">
+            <div><p style={uiLabel}>Desde</p><div className="flex flex-wrap gap-1.5 mt-2">{[1,2,3,4,5].map(o=>(<button key={o} style={uiPill(camOct===o)} onClick={()=>setCamOct(o)}>{nombreLat(camRoot)}{o}</button>))}</div></div>
+            <div><p style={uiLabel}>Largo</p><div className="flex gap-1.5 mt-2">{[[1,"1 octava"],[2,"2 octavas"]].map(([v,l])=>(<button key={v} style={uiPill(camLong===v)} onClick={()=>setCamLong(v)}>{l}</button>))}</div></div>
+          </div>
+          <p style={{...uiLabel,textTransform:"none",letterSpacing:0,color:"#8a8a8a",fontWeight:500,margin:"0 0 12px",fontSize:11}}>Tramo: {nombreLat(camRoot)}{camOct} → {nombreLat(camRoot)}{camOct+camLong}</p>
+          <div className="flex flex-wrap gap-x-6 gap-y-3 mb-3">
+            <div><p style={uiLabel}>Sentido al escuchar</p><div className="flex gap-1.5 mt-2">{[["sube","↑ Sube"],["baja","↓ Baja"],["ida","↕ Sube y baja"]].map(([v,l])=>(<button key={v} style={uiPill(camSent===v)} onClick={()=>setCamSent(v)}>{l}</button>))}</div></div>
+            <div><p style={uiLabel}>Figura</p><div className="flex flex-wrap gap-1.5 mt-2">{FIGURAS.map(f=>(<button key={f.id} style={uiPill(camFig===f.id)} onClick={()=>setCamFig(f.id)}>{f.nombre}</button>))}</div></div>
+          </div>
+          <div className="flex flex-wrap gap-3 items-center mb-3">
+            <span style={uiLabel}>Velocidad</span>
+            <input type="range" min="30" max="220" step="1" value={camBpm} onChange={e=>setCamBpm(Number(e.target.value))} style={{width:170}}/>
+            <span style={{fontSize:12,color:"#ececec",fontFamily:"monospace",minWidth:74}}>♩ = {camBpm}</span>
+            <button style={uiPill(!!camSuena,{padding:"7px 16px"})} onClick={camSuena?camParar:camEscuchar}>{camSuena?"■ Detener":"▶ Escuchar"}</button>
+          </div>
+          {cam && (
+            <>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {cam.nodos.map(nd=> nd.falta
+                  ? <span key={nd.k} style={{fontSize:11,color:"#6a6a6e",textDecoration:"line-through",border:"1px dashed #444",borderRadius:8,padding:"4px 8px"}}>✕ {camNotaTxt(nd)}</span>
+                  : <button key={nd.k} onClick={()=>tocarItem(nd.item)} title={nd.item.hand==="L"?"mano izquierda":"mano derecha"}
+                      style={{border:"2px solid rgba(255,255,255,.35)",background:nc(CHROMATIC[nd.item.pc]),color:"#fff",textShadow:"0 1px 3px #000",borderRadius:9,padding:"3px 8px",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:"monospace"}}>
+                      {nd.k} {camNotaTxt(nd)} <span style={{opacity:.8,fontSize:9}}>{nd.item.hand==="L"?"I":"D"}</span></button>)}
+              </div>
+              {cam.faltan.length>0 && (
+                <p style={{fontSize:12,color:"#c9a25a",margin:"10px 0 0",lineHeight:1.5}}>
+                  {cam.faltan.length===cam.nodos.length
+                    ? `No hay botones para este tramo ${bellows==="abre"?"abriendo":"cerrando"}.`
+                    : `${bellows==="abre"?"Abriendo":"Cerrando"} no están: ${cam.faltan.map(camNotaTxt).join(", ")}. El camino sigue desde la próxima nota que sí está.`}
+                </p>
+              )}
+            </>
+          )}
         </div>
       )}
 
@@ -4044,7 +4238,7 @@ function EntrenadorTab({preset}={}){
               👁 {reveal?"Ocultar respuesta":"Ver respuesta"}
             </button>
           )}
-          {modo!=="escalas" && <button onClick={()=>setChecked(true)} style={{padding:"6px 14px",borderRadius:9,border:"none",background:"#e6e6e6",color:"#0a0a0a",fontWeight:800,fontSize:11,cursor:"pointer"}}>
+          {modo!=="escalas" && modo!=="camino" && <button onClick={()=>setChecked(true)} style={{padding:"6px 14px",borderRadius:9,border:"none",background:"#e6e6e6",color:"#0a0a0a",fontWeight:800,fontSize:11,cursor:"pointer"}}>
             ✓ Corregir
           </button>}
           <button onClick={reiniciarFuelle} style={{padding:"6px 12px",borderRadius:9,border:"1px solid #2a2a2a",background:"transparent",color:"#8a8a8a",fontSize:10,cursor:"pointer"}}>
@@ -4055,7 +4249,13 @@ function EntrenadorTab({preset}={}){
 
       {/* Marcador */}
       <div style={{marginBottom:10,padding:"8px 12px",background:"#121212",border:"1px solid #333333",borderRadius:10,display:"flex",gap:16,flexWrap:"wrap",fontSize:11}}>
-        {modo==="forma" ? (
+        {modo==="camino" ? (
+          <>
+            <span style={{color:"#8a8a8a"}}>Camino: <b style={{color:"#e6e6e6"}}>{nombreLat(camRoot)} {camDef.nombre}</b></span>
+            <span style={{color:"#8a8a8a"}}>Fuelle: <b style={{color:"#e6e6e6"}}>{bellows==="abre"?"abriendo":"cerrando"}</b></span>
+            {cam && <span style={{color:"#8a8a8a"}}>Notas: <b style={{color:"#e6e6e6"}}>{cam.nodos.length-cam.faltan.length}/{cam.nodos.length}</b></span>}
+          </>
+        ) : modo==="forma" ? (
           <>
             <span style={{color:"#8a8a8a"}}>Círculos puestos: <b style={{color:"#e6e6e6"}}>{formaPuestos}</b> de {formaTot}</span>
             {checked && <span style={{color:"#8a8a8a"}}>Bien ubicados: <b style={{color:"#e6e6e6"}}>{formaBien}/{formaTot}</b></span>}
@@ -4096,7 +4296,7 @@ function EntrenadorTab({preset}={}){
             <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO IZQUIERDA · {modo==="forma" ? `${formaPts.L.length} círculos` : `${leftBtns.length} botones`}</p>
             {modo==="forma"
               ? <FormaCanvas real={leftBtns} pts={formaPts.L} onChange={(l)=>setFormaH("L",l)} checked={checked} reveal={reveal} grid={formaGrid} tol={formaTol} maxWidth={an.aL} maxScale={3.6}/>
-              : <PaintCanvas buttons={leftBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aL} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null}/>}
+              : <PaintCanvas buttons={leftBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aL} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null} flechas={modo==="camino"?camFlechas("L"):null} rotulos={modo==="camino"?camRotulos("L"):null}/>}
           </div>
         )}
         {(view==="ambas"||view==="derecha")&&(
@@ -4104,7 +4304,7 @@ function EntrenadorTab({preset}={}){
             <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO DERECHA · {modo==="forma" ? `${formaPts.R.length} círculos` : `${rightBtns.length} botones`}</p>
             {modo==="forma"
               ? <FormaCanvas real={rightBtns} pts={formaPts.R} onChange={(l)=>setFormaH("R",l)} checked={checked} reveal={reveal} grid={formaGrid} tol={formaTol} maxWidth={an.aR} maxScale={3.6}/>
-              : <PaintCanvas buttons={rightBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aR} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null}/>}
+              : <PaintCanvas buttons={rightBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aR} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null} flechas={modo==="camino"?camFlechas("R"):null} rotulos={modo==="camino"?camRotulos("R"):null}/>}
           </div>
         )}
       </div>
