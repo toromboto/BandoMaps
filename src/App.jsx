@@ -4142,6 +4142,10 @@ function EntrenadorTab({preset}={}){
   const maxW = wrapWidth; // cada teclado usa todo el ancho (apilados), así se ven lo más grandes posible
   const disp = useDisposicion();
   const an = calcAnchos(wrapWidth,leftBtns,rightBtns,view==="ambas",disp.lado,isMobile);
+  // Pantallas anchas con teclados apilados o de una mano: los controles pasan a los márgenes (izquierda: recorrido; derecha: escala y sonido)
+  const kbW = view==="ambas" ? Math.max(an.aL,an.aR) : view==="izquierda" ? an.aL : an.aR;
+  const sideW = Math.floor((wrapWidth-kbW-36)/2);
+  const lateral = !isMobile && !an.fila && sideW>=220 && (modo==="camino"||modo==="arpegio");
 
   const keyOf = useCallback((id)=>`${id}|${bellows}`,[bellows]);
   const correctOf = useCallback((btn)=>{
@@ -4361,20 +4365,21 @@ function EntrenadorTab({preset}={}){
   const camNotaTxt = (nd)=> nombreLat(nd.name)+octDeMidi(nd.midi);
 
   // Cabecera compartida de la pestaña Escalas: vista (Ver y escuchar / Practicar), tónica y escala
-  const escCab = (
-    <>
+  const escPills = (
       <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
         <button style={uiPill(modo==="camino",{padding:"7px 16px"})} onClick={()=>setModo("camino")}>🧭 Ver y escuchar</button>
         <button style={uiPill(modo==="escalas",{padding:"7px 16px"})} onClick={()=>setModo("escalas")}>✋ Practicar</button>
       </div>
+  );
+  const escSelects = (
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:12}}>
         <Desplegable etiqueta="Tónica" valor={escRoot} opciones={ACORDE_RAICES.map(x=>[x,nombreLat(x)])} onChange={v=>{setEscRoot(v);setEscStart(-1);}}/>
         <Desplegable etiqueta="Escala" valor={escTipo} opciones={modo==="camino"?ESCALAS_HERO.map(e=>[e.id,e.corto]):ESC_ENT.map(e=>[e.id,e.nombre])} onChange={setEscTipo}/>
       </div>
-    </>
   );
+  const escCab = (<>{escPills}{escSelects}</>);
   // Parte común de las vistas "Ver y escuchar": velocidad, escuchar, tira de notas por mano y avisos
-  const camAbajo = (
+  const camControles = (
     <>
           <div className="flex flex-wrap gap-3 items-center mb-3">
             <span style={uiLabel}>Velocidad</span>
@@ -4382,6 +4387,10 @@ function EntrenadorTab({preset}={}){
             <span style={{fontSize:12,color:"#ececec",fontFamily:"monospace",minWidth:74}}>♩ = {camBpm}</span>
             <button style={uiPill(!!camSuena,{padding:"7px 16px"})} onClick={camSuena?camParar:camEscuchar}>{camSuena?"■ Detener":"▶ Escuchar"}</button>
           </div>
+    </>
+  );
+  const camTiras = (
+    <>
           {cam && [["L","Mano izquierda"],["R","Mano derecha"]].map(([h,nombre])=>{
             const m=cam.manos[h], nada=m.nodos.every(n=>n.falta);
             return (
@@ -4403,6 +4412,7 @@ function EntrenadorTab({preset}={}){
           })}
     </>
   );
+  const camAbajo = (<>{camControles}{camTiras}</>);
   // Cabecera de la vista de acordes: Ver y escuchar / Armar
   const acoVistas = (
     <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
@@ -4476,6 +4486,56 @@ function EntrenadorTab({preset}={}){
 
   if(!leftBtns.length) return <div style={{color:"#555",padding:20,fontSize:13}}>Cargando...</div>;
 
+  const camRecorrido = (<><Seccion t="Recorrido"/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:8}}>
+            <Desplegable etiqueta="Mano izquierda desde" valor={camOctL} opciones={rg.L.map(o=>[o,nombreLat(escRoot)+o])} onChange={v=>setCamOctL(Number(v))}/>
+            <Desplegable etiqueta="Mano derecha desde" valor={camOctR} opciones={rg.R.map(o=>[o,nombreLat(escRoot)+o])} onChange={v=>setCamOctR(Number(v))}/>
+            <Desplegable etiqueta="Largo" valor={camLong} opciones={[[1,"1 octava"],[2,"2 octavas"]]} onChange={v=>setCamLong(Number(v))}/>
+          </div>
+          <p style={{...uiLabel,textTransform:"none",letterSpacing:0,color:"#8a8a8a",fontWeight:500,margin:"0 0 12px",fontSize:11}}>Izquierda: {nombreLat(escRoot)}{camOctL} → {nombreLat(escRoot)}{camOctL+camLong} · Derecha: {nombreLat(escRoot)}{camOctR} → {nombreLat(escRoot)}{camOctR+camLong}</p>
+          </>);
+  const camSonido = (<><Seccion t="Sonido"/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:12}}>
+            <Desplegable etiqueta="Sentido al escuchar" valor={camSent} opciones={[["sube","↑ Sube"],["baja","↓ Baja"],["ida","↕ Sube y baja"]]} onChange={setCamSent}/>
+            <Desplegable etiqueta="Figura" valor={camFig} opciones={FIGURAS.map(f=>[f.id,f.nombre])} onChange={setCamFig}/>
+            <Desplegable etiqueta="Metrónomo" valor={camMetro} opciones={[["no","Apagado"],["negra","Negra"],["blanca","Blanca"],["redonda","Redonda"]]} onChange={setCamMetro}/>
+          </div>
+          </>);
+  const arpAcorde = (<><Seccion t="Acorde"/>
+          <SelectoresAcorde a={acorde}/>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
+            <span style={{fontSize:14,fontFamily:"'Libre Baskerville',serif",fontWeight:700,color:"#e6e6e6"}}>{acorde.name}</span>
+            {acorde.tones.map(t=>(
+              <span key={t.pc} style={{display:"inline-flex",flexDirection:"column",alignItems:"center",lineHeight:1.1}}>
+                <span style={{minWidth:34,padding:"4px 6px",borderRadius:8,background:nc(t.pc),color:txtSobre(nc(t.pc)),fontFamily:"serif",fontWeight:900,fontSize:12,textAlign:"center",border:"2px solid rgba(255,255,255,.2)"}}>{t.nombre}</span>
+                <span style={{fontSize:9,fontFamily:"monospace",color:"#8a8a8a"}}>{t.lab}</span>
+              </span>
+            ))}
+          </div>
+          {acorde.ac.und==="11" && (acorde.ac.base==="M"||acorde.ac.base==="aug") && <p style={{fontSize:11,color:"#c9a25a",margin:"0 0 10px",lineHeight:1.5}}>La oncena natural queda a un semitono de la tercera mayor y choca con ella. Suele usarse como suspendido (Tipo sus4) o como oncena aumentada (#11).</p>}
+          </>);
+  const arpRecorrido = (<><Seccion t="Recorrido"/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:8}}>
+            <Desplegable etiqueta="Inversión" valor={acoInvOk} opciones={[[0,"Fundamental"],[1,"1ª inversión"],[2,"2ª inversión"],[3,"3ª inversión"]].filter(([v])=>v<=Math.max(0,nTonosArp-1))} onChange={v=>setAcoInv(Number(v))}/>
+            <Desplegable etiqueta="Raíz, mano izquierda" valor={camOctL} opciones={rg.L.map(o=>[o,nombreLat(acorde.ac.root)+o])} onChange={v=>setCamOctL(Number(v))}/>
+            <Desplegable etiqueta="Raíz, mano derecha" valor={camOctR} opciones={rg.R.map(o=>[o,nombreLat(acorde.ac.root)+o])} onChange={v=>setCamOctR(Number(v))}/>
+            <Desplegable etiqueta="Largo" valor={camLong} opciones={[[1,"1 octava"],[2,"2 octavas"]]} onChange={v=>setCamLong(Number(v))}/>
+          </div>
+          <p style={{...uiLabel,textTransform:"none",letterSpacing:0,color:"#8a8a8a",fontWeight:500,margin:"0 0 12px",fontSize:11}}>La raíz parte en {nombreLat(acorde.ac.root)}{camOctL} (izquierda) y {nombreLat(acorde.ac.root)}{camOctR} (derecha); en las inversiones el arpegio empieza más arriba, en la nota que corresponda. Las inversiones usan las notas del acorde, no las tensiones.</p>
+          </>);
+  const arpSonido = (<><Seccion t="Sonido"/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:12}}>
+            <Desplegable etiqueta="Sentido al escuchar" valor={camSent} opciones={[["sube","↑ Sube"],["baja","↓ Baja"],["ida","↕ Sube y baja"]]} onChange={setCamSent}/>
+            <Desplegable etiqueta="Figura" valor={camFig} opciones={FIGURAS.map(f=>[f.id,f.nombre])} onChange={setCamFig}/>
+            <Desplegable etiqueta="Metrónomo" valor={camMetro} opciones={[["no","Apagado"],["negra","Negra"],["blanca","Blanca"],["redonda","Redonda"]]} onChange={setCamMetro}/>
+          </div>
+          </>);
+  const asideS={flex:"1 1 0",minWidth:0,background:"#121212",border:"1px solid #2a2a2a",borderRadius:12,padding:"12px 14px"};
+  const lateralIzq = modo==="camino" ? <>{camRecorrido}{camTiras}</> : <>{arpRecorrido}{camTiras}</>;
+  const lateralDer = modo==="camino"
+    ? <><Seccion t="Escala"/>{escSelects}{camSonido}<div style={{marginTop:2}}>{camControles}</div></>
+    : <>{arpAcorde}{arpSonido}<div style={{marginTop:2}}>{camControles}</div></>;
+
   return (
     <div style={{fontFamily:UI_FONT}}>
       <div className="mb-4">
@@ -4546,22 +4606,9 @@ function EntrenadorTab({preset}={}){
             <button style={uiPill(camLey,{padding:"6px 12px",flexShrink:0})} onClick={()=>setCamLey(v=>!v)}>❓ Cómo leerlo</button>
           </div>
           {camLey && <LeyendaCamino/>}
-          {escCab}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:"0 28px",alignItems:"start"}}><div><Seccion t="Recorrido"/>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:8}}>
-            <Desplegable etiqueta="Mano izquierda desde" valor={camOctL} opciones={rg.L.map(o=>[o,nombreLat(escRoot)+o])} onChange={v=>setCamOctL(Number(v))}/>
-            <Desplegable etiqueta="Mano derecha desde" valor={camOctR} opciones={rg.R.map(o=>[o,nombreLat(escRoot)+o])} onChange={v=>setCamOctR(Number(v))}/>
-            <Desplegable etiqueta="Largo" valor={camLong} opciones={[[1,"1 octava"],[2,"2 octavas"]]} onChange={v=>setCamLong(Number(v))}/>
-          </div>
-          <p style={{...uiLabel,textTransform:"none",letterSpacing:0,color:"#8a8a8a",fontWeight:500,margin:"0 0 12px",fontSize:11}}>Izquierda: {nombreLat(escRoot)}{camOctL} → {nombreLat(escRoot)}{camOctL+camLong} · Derecha: {nombreLat(escRoot)}{camOctR} → {nombreLat(escRoot)}{camOctR+camLong}</p>
-          </div><div><Seccion t="Sonido"/>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:12}}>
-            <Desplegable etiqueta="Sentido al escuchar" valor={camSent} opciones={[["sube","↑ Sube"],["baja","↓ Baja"],["ida","↕ Sube y baja"]]} onChange={setCamSent}/>
-            <Desplegable etiqueta="Figura" valor={camFig} opciones={FIGURAS.map(f=>[f.id,f.nombre])} onChange={setCamFig}/>
-            <Desplegable etiqueta="Metrónomo" valor={camMetro} opciones={[["no","Apagado"],["negra","Negra"],["blanca","Blanca"],["redonda","Redonda"]]} onChange={setCamMetro}/>
-          </div>
-          </div></div>
-          {camAbajo}
+          {lateral ? escPills : escCab}
+          {lateral ? null : (<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:"0 28px",alignItems:"start"}}><div>{camRecorrido}</div><div>{camSonido}</div></div>)}
+          {lateral ? null : camAbajo}
         </div>
       )}
 
@@ -4573,34 +4620,9 @@ function EntrenadorTab({preset}={}){
           </div>
           {camLey && <LeyendaCamino arpegio/>}
           {acoVistas}
-          <Seccion t="Acorde"/>
-          <SelectoresAcorde a={acorde}/>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
-            <span style={{fontSize:14,fontFamily:"'Libre Baskerville',serif",fontWeight:700,color:"#e6e6e6"}}>{acorde.name}</span>
-            {acorde.tones.map(t=>(
-              <span key={t.pc} style={{display:"inline-flex",flexDirection:"column",alignItems:"center",lineHeight:1.1}}>
-                <span style={{minWidth:34,padding:"4px 6px",borderRadius:8,background:nc(t.pc),color:txtSobre(nc(t.pc)),fontFamily:"serif",fontWeight:900,fontSize:12,textAlign:"center",border:"2px solid rgba(255,255,255,.2)"}}>{t.nombre}</span>
-                <span style={{fontSize:9,fontFamily:"monospace",color:"#8a8a8a"}}>{t.lab}</span>
-              </span>
-            ))}
-          </div>
-          {acorde.ac.und==="11" && (acorde.ac.base==="M"||acorde.ac.base==="aug") && <p style={{fontSize:11,color:"#c9a25a",margin:"0 0 10px",lineHeight:1.5}}>La oncena natural queda a un semitono de la tercera mayor y choca con ella. Suele usarse como suspendido (Tipo sus4) o como oncena aumentada (#11).</p>}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:"0 28px",alignItems:"start"}}><div><Seccion t="Recorrido"/>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:8}}>
-            <Desplegable etiqueta="Inversión" valor={acoInvOk} opciones={[[0,"Fundamental"],[1,"1ª inversión"],[2,"2ª inversión"],[3,"3ª inversión"]].filter(([v])=>v<=Math.max(0,nTonosArp-1))} onChange={v=>setAcoInv(Number(v))}/>
-            <Desplegable etiqueta="Raíz, mano izquierda" valor={camOctL} opciones={rg.L.map(o=>[o,nombreLat(acorde.ac.root)+o])} onChange={v=>setCamOctL(Number(v))}/>
-            <Desplegable etiqueta="Raíz, mano derecha" valor={camOctR} opciones={rg.R.map(o=>[o,nombreLat(acorde.ac.root)+o])} onChange={v=>setCamOctR(Number(v))}/>
-            <Desplegable etiqueta="Largo" valor={camLong} opciones={[[1,"1 octava"],[2,"2 octavas"]]} onChange={v=>setCamLong(Number(v))}/>
-          </div>
-          <p style={{...uiLabel,textTransform:"none",letterSpacing:0,color:"#8a8a8a",fontWeight:500,margin:"0 0 12px",fontSize:11}}>La raíz parte en {nombreLat(acorde.ac.root)}{camOctL} (izquierda) y {nombreLat(acorde.ac.root)}{camOctR} (derecha); en las inversiones el arpegio empieza más arriba, en la nota que corresponda. Las inversiones usan las notas del acorde, no las tensiones.</p>
-          </div><div><Seccion t="Sonido"/>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:12}}>
-            <Desplegable etiqueta="Sentido al escuchar" valor={camSent} opciones={[["sube","↑ Sube"],["baja","↓ Baja"],["ida","↕ Sube y baja"]]} onChange={setCamSent}/>
-            <Desplegable etiqueta="Figura" valor={camFig} opciones={FIGURAS.map(f=>[f.id,f.nombre])} onChange={setCamFig}/>
-            <Desplegable etiqueta="Metrónomo" valor={camMetro} opciones={[["no","Apagado"],["negra","Negra"],["blanca","Blanca"],["redonda","Redonda"]]} onChange={setCamMetro}/>
-          </div>
-          </div></div>
-          {camAbajo}
+          {lateral ? null : arpAcorde}
+          {lateral ? null : (<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:"0 28px",alignItems:"start"}}><div>{arpRecorrido}</div><div>{arpSonido}</div></div>)}
+          {lateral ? null : camAbajo}
         </div>
       )}
 
@@ -4878,7 +4900,9 @@ function EntrenadorTab({preset}={}){
       </div>
 
       {/* Teclados */}
-      <div ref={wrapRef} style={{display:"flex",flexDirection:an.fila?"row":(disp.invertir?"column-reverse":"column"),gap:an.gap,alignItems:an.fila?"flex-start":"center",paddingBottom:8}}>
+      <div ref={wrapRef} style={lateral?{display:"flex",gap:18,alignItems:"flex-start",paddingBottom:8,width:"100%",minWidth:0}:{display:"flex",flexDirection:an.fila?"row":(disp.invertir?"column-reverse":"column"),gap:an.gap,alignItems:an.fila?"flex-start":"center",paddingBottom:8}}>
+        {lateral && <aside style={asideS}>{lateralIzq}</aside>}
+        <div style={lateral?{display:"flex",flexDirection:disp.invertir?"column-reverse":"column",gap:an.gap,alignItems:"center",width:kbW,flexShrink:0}:{display:"contents"}}>
         {(view==="ambas"||view==="izquierda")&&(
           <div style={{width: an.aL, flexShrink:0}}>
             <p style={{fontSize:11,color:"#8a8a8a",marginBottom:6,letterSpacing:"0.12em"}}>MANO IZQUIERDA · {modo==="forma" ? `${formaPts.L.length} círculos` : `${leftBtns.length} botones`}</p>
@@ -4895,6 +4919,8 @@ function EntrenadorTab({preset}={}){
               : <PaintCanvas buttons={rightBtns} guesses={guesses} keyOf={keyOf} checked={checked} correctOf={correctOf} onTapButton={tapBtn} maxWidth={an.aR} maxScale={3.6} activeId={modo==="escalas" ? info?.btn.id : picker?.btn.id} chord={chordProps} escala={scaleProps} rotulo={modo==="colores"?notaOct:null} flechas={esCam?camFlechas("R"):modo==="lineas"?linFlechas("R"):null}/>}
           </div>
         )}
+        </div>
+        {lateral && <aside style={asideS}>{lateralDer}</aside>}
       </div>
 
       {/* Enviar para revisión */}
