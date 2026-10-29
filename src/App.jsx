@@ -2247,27 +2247,81 @@ function BandEditor({ initialLeft, initialRight, onSave, onCancel }) {
 
 // ─── BANDONEÓN TAB PRINCIPAL ──────────────────────────────────────────────────
 // ─── NOTAS MARCADAS: nombre del acorde a partir de las notas marcadas ─────────
-const ACORDES_PLANTILLA=[
-  ["mayor",[0,4,7]],["menor",[0,3,7]],["disminuido",[0,3,6]],["aumentado",[0,4,8]],["sus2",[0,2,7]],["sus4",[0,5,7]],
-  ["6",[0,4,7,9]],["m6",[0,3,7,9]],["7",[0,4,7,10]],["△7",[0,4,7,11]],["m7",[0,3,7,10]],["ø7",[0,3,6,10]],["°7",[0,3,6,9]],["m△7",[0,3,7,11]],["7sus4",[0,5,7,10]],
-  ["add9",[0,2,4,7]],["m add9",[0,2,3,7]],["9",[0,2,4,7,10]],["△9",[0,2,4,7,11]],["m9",[0,2,3,7,10]],
-  ["7 (sin 5ª)",[0,4,10]],["△7 (sin 5ª)",[0,4,11]],["m7 (sin 5ª)",[0,3,10]],["5 (sin 3ª)",[0,7]],
-];
 const RAIZ_NOM=["C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
-function nombreAcordePcs(pcs,bajoPc){
-  const set=[...new Set(pcs)]; if(set.length<2) return null;
-  const orden=[bajoPc,...set.filter(p=>p!==bajoPc)];
-  for(const r of orden){
-    const ivs=set.map(p=>(p-r+12)%12).sort((a,b)=>a-b);
-    const hit=ACORDES_PLANTILLA.find(([,t])=>t.length===ivs.length&&t.every((v,i)=>v===ivs[i]));
-    if(hit) return nombreLat(RAIZ_NOM[r])+" "+hit[0]+(r!==bajoPc?" / "+nombreLat(RAIZ_NOM[bajoPc]):"");
+// Nomenclatura general: nombra CUALQUIER conjunto de notas a partir de una raíz (3ª, 5ª, 7ª, tensiones, alteraciones, sus, add, 6).
+const CIF_ESTILOS={jazz:{M7:"△",dim:"°",hdim:"ø",aug:"+",mM:"m△"},amer:{M7:"maj",dim:"dim",hdim:"m7♭5",aug:"aug",mM:"mMaj"}};
+const cifEstilo=()=>{ try{ return localStorage.getItem("harmonia_estilo_cifrado")==="amer"?"amer":"jazz"; }catch(e){ return "jazz"; } };
+const cifPropios=()=>{ try{ return JSON.parse(localStorage.getItem("harmonia_nombres_acordes")||"{}")||{}; }catch(e){ return {}; } };
+const cifGuardarPropios=(o)=>{ try{ localStorage.setItem("harmonia_nombres_acordes",JSON.stringify(o)); }catch(e){} };
+const INTERVALOS_NOM=["unísono","segunda menor","segunda mayor","tercera menor","tercera mayor","cuarta justa","tritono","quinta justa","sexta menor","sexta mayor","séptima menor","séptima mayor"];
+function cifSufijo(S,est){
+  const E=CIF_ESTILOS[est], has=i=>S.has(i);
+  const third=has(4)?"M":has(3)?"m":null, p5=has(7), b5=has(6);
+  const dimF=third==="m"&&b5&&!p5, d7=dimF&&has(9), m7=has(10), M7=has(11), sev=d7||m7||M7;
+  const aug=third!=="m"&&has(8)&&!p5&&!b5;
+  const sus4=!third&&has(5), sus2=!third&&has(2)&&!sev&&!has(5), sus24=!third&&has(2)&&has(5)&&!sev;
+  const e9=has(2)&&!!(sev||third), e11=has(5)&&!!third&&sev&&!dimF, e13=has(9)&&sev&&!d7&&!dimF;
+  const g={0:"1"}, alts=[], extra=[]; let suf="", score=0;
+  const num=e13?13:e11?11:e9?9:7;
+  if(dimF){
+    if(d7) suf=E.dim+"7"; else if(m7) suf=E.hdim+(est==="jazz"?"7":""); else if(M7) suf="m△7(♭5)"; else suf=E.dim;
+    if(est==="amer"&&m7) suf="m7♭5";
+    if(e9&&sev) extra.push("9"); if(has(5)) extra.push("11");
+  } else if(sev){
+    const base=M7?(third==="m"?E.mM:E.M7):(third==="m"?"m":"");
+    suf=base+num;
+    if(e13&&has(5)&&third) extra.push("11");
+  } else {
+    if(third==="m") suf="m";
+    else if(aug) suf=E.aug;
+    if(third&&has(9)) suf+=has(2)?"6/9":"6";
+    else if(third&&has(2)) suf+="add9";
+    if(third&&has(5)) suf+="add11";
   }
-  return null;
+  if(sus4&&sus2===false&&has(2)) { /* 9sus4 */ }
+  if(sus24) suf+="sus(2,4)"; else if(sus4) suf+="sus4"; else if(sus2) suf+="sus2";
+  if(has(1)) alts.push("♭9"); if(has(3)&&third==="M") alts.push("♯9");
+  if(has(6)&&!dimF){ alts.push(p5?"♯11":"♭5"); }
+  if(has(8)&&!aug){ if(p5||third==="m"||third===null) alts.push("♭13"); }
+  if(aug&&sev) alts.push("♯5");
+  const parts=[...extra,...alts];
+  if(parts.length) suf+="("+parts.join(",")+")";
+  if(!third&&!sus4&&!sus2&&!sus24&&S.size>1) suf+="(sin 3ª)";
+  if(S.size===1&&p5) suf="5";
+  score=alts.length*2+extra.length+(third?0:(sus4||sus2||sus24?3:5))+(has(9)&&!sev&&third?1:0);
+  // grados para rotular el teclado
+  g[1]="♭9"; g[2]=(sev||third)?"9":"2"; g[3]=third==="M"?"♯9":"♭3"; g[4]="3"; g[5]=(third||sev)?"11":"4";
+  g[6]=(p5&&!dimF)?"♯11":"♭5"; g[7]="5"; g[8]=aug?"♯5":"♭13"; g[9]=d7?"♭♭7":sev?"13":"6"; g[10]="♭7"; g[11]="7";
+  if(third==="M"&&has(3)) g[3]="♯9";
+  return {suf,g,score};
 }
+function analizarAcorde(pcs,bajoPc,opt={}){
+  const set=[...new Set(pcs)]; if(set.length<2) return null;
+  const est=cifEstilo(), propios=cifPropios();
+  if(set.length===2){
+    const d=((set[1]-set[0])+12)%12, r=set[0];
+    if(d===7) return {nombre:nombreLat(RAIZ_NOM[r])+" 5",suf:"5",key:"0,7",rootPc:r,grados:{0:"1",7:"5"},alts:[],custom:false,defaultSuf:"5",intervalo:false};
+    return {nombre:"Intervalo de "+INTERVALOS_NOM[Math.min(d,12-d)===d?d:d]+" ("+nombreLat(RAIZ_NOM[r])+"–"+nombreLat(RAIZ_NOM[set[1]])+")",suf:"",key:"",rootPc:r,grados:{},alts:[],custom:false,defaultSuf:"",intervalo:true};
+  }
+  const ev=(r)=>{
+    const S=new Set(set.filter(p=>p!==r).map(p=>(p-r+12)%12)), key=[0,...[...S].sort((x,y)=>x-y)].join(",");
+    const c=cifSufijo(S,est), custom=propios[key]!==undefined, suf=custom?propios[key]:c.suf;
+    const raiz=nombreLat(RAIZ_NOM[r]), cuerpo=suf===""?"mayor":suf==="m"?"menor":suf;
+    const barra=r!==bajoPc?" / "+nombreLat(RAIZ_NOM[bajoPc]):"";
+    return {nombre:raiz+" "+cuerpo+barra,suf,key,rootPc:r,grados:c.g,custom,defaultSuf:c.suf,score:(custom?-10:c.score)+(r===bajoPc?0:3),intervalo:false};
+  };
+  const todos=set.map(ev).sort((x,y)=>x.score-y.score);
+  const elegido=(opt.raiz!=null&&todos.find(x=>x.rootPc===opt.raiz))||todos[0];
+  const vistos=new Set([elegido.nombre]), alts=[];
+  todos.forEach(x=>{ if(x!==elegido&&x.score<=4&&!/\(/.test(x.nombre)&&!vistos.has(x.nombre)){ vistos.add(x.nombre); alts.push({nombre:x.nombre,rootPc:x.rootPc}); } });
+  return {...elegido,alts:alts.slice(0,3)};
+}
+function nombreAcordePcs(pcs,bajoPc,raiz){ const r=analizarAcorde(pcs,bajoPc,{raiz}); return r?r.nombre:null; }
 function PanelMarcadas({marcadas,marcar,onRemove,onClear}){
   const orden=[...marcadas].sort((a,b)=>a.midi-b.midi||a.orden-b.orden);
   const nombre=(m)=>nombreLat(RAIZ_NOM[m.pc]);
-  const acorde=orden.length>=2?nombreAcordePcs(orden.map(m=>m.pc),orden[0].pc):null;
+  const prim=[...marcadas].sort((x,y)=>x.orden-y.orden)[0];
+  const acorde=orden.length>=2?nombreAcordePcs(orden.map(m=>m.pc),orden[0].pc,prim?prim.pc:null):null;
   const tocar=(arp)=>orden.forEach((m,i)=>playBandDur(CHROMATIC[m.pc],m.oct,arp?0.38:1.8,arp?i*0.32:i*0.012));
   return(
     <div style={{background:"#121214",border:"1px solid #26262a",borderRadius:12,padding:"12px 14px"}}>
@@ -2290,7 +2344,7 @@ function PanelMarcadas({marcadas,marcar,onRemove,onClear}){
             </div>
             <p style={{fontFamily:UI_FONT,fontSize:13,color:"#ececec",margin:"0 0 10px"}}>
               <span style={{...uiLabel,marginRight:8}}>Acorde</span>
-              <b style={{fontFamily:"'Libre Baskerville',serif",fontSize:16}}>{acorde||(orden.length<2?"—":"sin nombre conocido")}</b>
+              <b style={{fontFamily:"'Libre Baskerville',serif",fontSize:16}}>{acorde||"—"}</b>
             </p>
           </>}
       <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
@@ -4027,7 +4081,7 @@ function EntrenadorTab({preset}={}){
   const [camElige,setCamElige]=useState({}), [camSuena,setCamSuena]=useState(null), [camLey,setCamLey]=useState(false);
   const esCam = modo==="camino" || modo==="arpegio" || modo==="voz";       // vistas "Ver y escuchar" (escalas y acordes)
   const [acoInv,setAcoInv]=useState(0), [acoUltimo,setAcoUltimo]=useState("arpegio");   // inversión y última vista de la pestaña Acordes
-  useEffect(()=>{ if(modo==="arpegio"||modo==="acordes"||modo==="voz") setAcoUltimo(modo); },[modo]);
+  useEffect(()=>{ if(modo==="arpegio"||modo==="acordes"||modo==="construir") setAcoUltimo(modo); },[modo]);
   const nTonosArp=acorde.tones.filter(t=>!t.up).length, acoInvOk=Math.min(acoInv,Math.max(0,nTonosArp-1),3);
   const [escUltimo,setEscUltimo]=useState("camino");   // última vista de la pestaña Escalas
   useEffect(()=>{ if(modo==="camino"||modo==="escalas") setEscUltimo(modo); },[modo]);
@@ -4132,6 +4186,28 @@ function EntrenadorTab({preset}={}){
   const itemDe = (btn)=> itemsMano([btn],bellows)[0];
   const etiqueta = (it)=> (escDeletreo[it.pc]||CROM_SIMPLE[CHROMATIC[it.pc]]) + it.oct;
   const tocarItem = (it)=> playBand(CHROMATIC[it.pc], it.oct);
+  // Construir un acorde directamente sobre el teclado
+  const [conSel,setConSel]=useState({abre:[],cierra:[]}), [conRaiz,setConRaiz]=useState(null), [conVer,setConVer]=useState(0), [conTxt,setConTxt]=useState(""), [conMsg,setConMsg]=useState("");
+  const conIds=conSel[bellows];
+  const conBy=useMemo(()=>Object.fromEntries([...leftBtns,...rightBtns].map(b=>[b.id,b])),[leftBtns,rightBtns]);
+  const conItems=useMemo(()=>conIds.map((id,k)=>conBy[id]?{...itemsMano([conBy[id]],bellows)[0],orden:k+1,mano:id.startsWith("L")?"Izq.":"Der."}:null).filter(Boolean),[conIds,conBy,bellows]);
+  const conPrimera=conItems.length?conItems[0].pc:null;
+  const conRaizUso=(conRaiz!=null&&conItems.some(i=>i.pc===conRaiz))?conRaiz:conPrimera;
+  const conAn=useMemo(()=>{ if(conItems.length<2) return null; const bajo=[...conItems].sort((a,b)=>a.midi-b.midi)[0].pc; return analizarAcorde(conItems.map(i=>i.pc),bajo,{raiz:conRaizUso}); },[conItems,conRaizUso,conVer]);
+  useEffect(()=>{ setConTxt(conAn&&!conAn.intervalo?conAn.suf:""); setConMsg(""); },[conAn&&conAn.key,conAn&&conAn.suf]);
+  const conStateOf=(btn)=>{
+    const it=itemDe(btn), nt=CHROMATIC[it.pc], col=nc(nt), k=conIds.indexOf(btn.id);
+    if(k<0) return {bg:col+"30",border:`2px solid ${col}70`,glow:"none",content:<span style={{fontSize:8.5,fontWeight:700,color:"#ffffffa0",textShadow:"0 1px 2px #000"}}>{CROM_SIMPLE[nt]}</span>};
+    const gr=conAn&&conAn.grados[(it.pc-conAn.rootPc+12)%12], nom=nombreLat(RAIZ_NOM[it.pc]);
+    return {bg:col,border:"3px solid #fff",glow:`0 0 0 3px #ffffff55, 0 0 14px ${col}`,
+      content:<span style={{display:"flex",flexDirection:"column",alignItems:"center",lineHeight:1.05,color:"#fff",textShadow:"0 1px 3px rgba(0,0,0,.95)"}}>
+        <b style={{fontSize:nom.length>3?10.5:13}}>{nom}</b><span style={{fontSize:9.5,fontWeight:800,fontFamily:"monospace"}}>{gr||k+1}</span></span>};
+  };
+  const conTap=(btn)=>{ tocarItem(itemDe(btn)); setConSel(m=>{ const cur=m[bellows]; return {...m,[bellows]:cur.includes(btn.id)?cur.filter(x=>x!==btn.id):[...cur,btn.id]}; }); };
+  const conQuitar=(id)=>setConSel(m=>({...m,[bellows]:m[bellows].filter(x=>x!==id)}));
+  const conTocar=(arp)=>{ const o=[...conItems].sort((a,b)=>a.midi-b.midi); o.forEach((it,i)=>playBandDur(CHROMATIC[it.pc],it.oct,arp?0.38:1.8,arp?i*0.32:i*0.012)); };
+  const conGuardar=()=>{ if(!conAn||conAn.intervalo) return; const p={...cifPropios()}, t=conTxt.trim(); if(t===""||t===conAn.defaultSuf) delete p[conAn.key]; else p[conAn.key]=t; cifGuardarPropios(p); setConVer(v=>v+1); setConMsg(t===""||t===conAn.defaultSuf?"Volvió al nombre automático.":"Guardado. Se usará siempre que armes esta estructura, en cualquier tonalidad."); };
+  const conCopiar=()=>{ const p=cifPropios(), txt=Object.keys(p).map(k=>k+" = "+p[k]).join("\n"); try{ navigator.clipboard.writeText("Mis nombres de acordes (intervalos en semitonos desde la raíz = sufijo)\n"+txt); setConMsg("Copiado: pegalo para pasármelo."); }catch(e){ setConMsg("No se pudo copiar."); } };
   // Ubicar líneas
   const [linTipo,setLinTipo]=useState("filas"), [linSel,setLinSel]=useState(-1), [linRot,setLinRot]=useState("pos");
   const linL=useMemo(()=>lineasDe("L",leftBtns,linTipo,bellows),[leftBtns,linTipo,bellows]);
@@ -4331,17 +4407,18 @@ function EntrenadorTab({preset}={}){
   const acoVistas = (
     <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
       <button style={uiPill(modo==="arpegio",{padding:"7px 16px"})} onClick={()=>setModo("arpegio")}>🧭 Ver y escuchar</button>
-      <button style={uiPill(modo==="voz",{padding:"7px 16px"})} onClick={()=>setModo("voz")}>🎹 Distribuir</button>
+      <button style={uiPill(modo==="construir",{padding:"7px 16px"})} onClick={()=>setModo("construir")}>🏗 Construir</button>
       <button style={uiPill(modo==="acordes",{padding:"7px 16px"})} onClick={()=>setModo("acordes")}>🎼 Armar</button>
     </div>
   );
-  const scaleProps = modo==="lineas" ? { stateOf:linStateOf } : modo==="escalas" ? { stateOf:escStateOf } : modo==="notas" ? { stateOf:notaStateOf } : esCam ? { stateOf:camStateOf } : null;
-  const tapBtn = (btn, rect)=> modo==="lineas" ? linTap(btn) : modo==="acordes" ? toggleSel(btn) : modo==="escalas" ? escTap(btn, rect) : modo==="notas" ? setNotaPicker({btn,rect}) : esCam ? camTap(btn) : openPicker(btn, rect);
+  const scaleProps = modo==="construir" ? { stateOf:conStateOf } : modo==="lineas" ? { stateOf:linStateOf } : modo==="escalas" ? { stateOf:escStateOf } : modo==="notas" ? { stateOf:notaStateOf } : esCam ? { stateOf:camStateOf } : null;
+  const tapBtn = (btn, rect)=> modo==="construir" ? conTap(btn) : modo==="lineas" ? linTap(btn) : modo==="acordes" ? toggleSel(btn) : modo==="escalas" ? escTap(btn, rect) : modo==="notas" ? setNotaPicker({btn,rect}) : esCam ? camTap(btn) : openPicker(btn, rect);
   const painted = allButtons.filter(b=>guesses[keyOf(b.id)]);
   const correctos = painted.filter(b=>guesses[keyOf(b.id)]===correctOf(b));
 
   const reiniciarFuelle = ()=>{
     if(modo==="lineas"){ setLinSel(-1); return; }
+    if(modo==="construir"){ setConSel(m=>({...m,[bellows]:[]})); setConRaiz(null); return; }
     if(modo==="escalas"){ setProg({i:1,err:0,hint:false,wrong:null}); return; }
     if(esCam){ camParar(); setCamElige({}); if(modo==="voz") setVoz(v=>({...v,man:{},soloLista:false})); return; }
     if(modo==="forma"){ setFormaPts(f=>({L:view!=="derecha"?[]:f.L, R:view!=="izquierda"?[]:f.R})); setChecked(false); setReveal(false); return; }
@@ -4403,10 +4480,11 @@ function EntrenadorTab({preset}={}){
     <div style={{fontFamily:UI_FONT}}>
       <div className="mb-4">
         <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>
-          🎓 Entrenador — {modo==="lineas"?"Ubicar líneas":modo==="forma"?"Armá el teclado":modo==="notas"?"Poné las notas":(modo==="camino"||modo==="escalas")?"Escalas":(modo==="arpegio"||modo==="acordes"||modo==="voz")?"Acordes":"Pintá el teclado"}
+          🎓 Entrenador — {modo==="lineas"?"Ubicar líneas":modo==="forma"?"Armá el teclado":modo==="notas"?"Poné las notas":(modo==="camino"||modo==="escalas")?"Escalas":(modo==="arpegio"||modo==="acordes"||modo==="voz"||modo==="construir")?"Acordes":"Pintá el teclado"}
         </h2>
         <p className="text-xs text-gray-500">
-          {modo==="lineas" ? "Mirá cómo se ordenan los botones en filas y diagonales, contalos y escuchá cada línea para encontrar la lógica del teclado."
+          {modo==="construir" ? "Armá un acorde tocando los botones, con las dos manos, y mirá cómo se llama."
+            : modo==="lineas" ? "Mirá cómo se ordenan los botones en filas y diagonales, contalos y escuchá cada línea para encontrar la lógica del teclado."
             : modo==="camino" ? "Mirá y escuchá el camino de cada escala sobre los dos teclados, abriendo o cerrando."
             : modo==="escalas" ? "Practicá la escala sobre el teclado, con la guía o de memoria."
             : modo==="voz" ? "Repartí las notas del acorde entre las dos manos, elegí la octava de cada una y guardá la forma."
@@ -4421,7 +4499,7 @@ function EntrenadorTab({preset}={}){
       {/* Modo del ejercicio */}
       <div style={{display:"flex",flexWrap:"wrap",background:"#121212",border:"1.5px solid #2a2a2a",borderRadius:10,padding:3,gap:2,marginBottom:10,width:"fit-content",maxWidth:"100%"}}>
         {[["lineas","📐 Ubicar líneas"],["colores","🎨 Pintar colores"],["acordes","🎼 Acordes"],["escalas","🎶 Escalas"],["forma","◯ Armar el teclado"],["notas","♪ Poner las notas"]].map(([m,l])=>(
-          <button key={m} style={{...pill(modo===m||(m==="escalas"&&modo==="camino")||(m==="acordes"&&(modo==="arpegio"||modo==="voz"))),padding:"6px 14px",fontSize:11}} onClick={()=>setModo(m==="escalas"?escUltimo:m==="acordes"?acoUltimo:m)}>{l}</button>
+          <button key={m} style={{...pill(modo===m||(m==="escalas"&&modo==="camino")||(m==="acordes"&&(modo==="arpegio"||modo==="voz"||modo==="construir"))),padding:"6px 14px",fontSize:11}} onClick={()=>setModo(m==="escalas"?escUltimo:m==="acordes"?acoUltimo:m)}>{l}</button>
         ))}
       </div>
 
@@ -4582,6 +4660,72 @@ function EntrenadorTab({preset}={}){
           </table></div>
         </div>); })()}
 
+      {modo==="construir" && (()=>{
+        const orden=[...conItems].sort((a,b)=>a.midi-b.midi||a.orden-b.orden), propios=cifPropios(), claves=Object.keys(propios);
+        const ejC=(k)=>k.split(",").map(n=>CROM_SIMPLE[CHROMATIC[Number(n)%12]]).join(" · ");
+        return (
+        <div className="rounded-xl mb-3" style={{background:"#121212",border:"1px solid #2a2a2a",padding:"12px 14px"}}>
+          {acoVistas}
+          <p className="text-xs text-gray-500" style={{margin:"0 0 12px"}}>Tocá los botones de cualquier mano para armar el acorde. La primera nota que marcás es la raíz; después sumá las que quieras, en cualquier orden, repetidas en otras octavas o con tensiones. Tocá una nota marcada para sacarla.</p>
+          <div style={{padding:"10px 12px",borderRadius:12,background:"#0e0e10",border:"1px solid #26262a",marginBottom:10}}>
+            <p style={{...uiLabel,margin:"0 0 4px"}}>Acorde</p>
+            <p style={{margin:0,fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:22,color:"#ececec"}}>
+              {conAn?conAn.nombre:(conItems.length===0?"—":"Marcá otra nota")}
+              {conAn&&conAn.custom&&<span style={{marginLeft:8,fontFamily:UI_FONT,fontSize:10,fontWeight:700,color:"#8a8a8a",border:"1px solid #3a3a3e",borderRadius:6,padding:"1px 6px",verticalAlign:"middle"}}>mi nombre</span>}
+            </p>
+            {conAn&&!conAn.intervalo&&conAn.alts.length>0 && (
+              <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center",marginTop:8}}>
+                <span style={{fontSize:11,color:"#8a8a8a"}}>También se puede leer como:</span>
+                {conAn.alts.map(x=>(<button key={x.nombre} style={uiPill(false,{padding:"3px 10px",fontSize:11})} onClick={()=>setConRaiz(x.rootPc)}>{x.nombre}</button>))}
+                {conRaiz!=null&&conRaiz!==conPrimera&&<button style={uiPill(false,{padding:"3px 10px",fontSize:11})} onClick={()=>setConRaiz(null)}>↺ Raíz = primera nota</button>}
+              </div>)}
+          </div>
+          {orden.length>0 && (
+            <div style={{display:"flex",flexWrap:"wrap",gap:7,marginBottom:10}}>
+              {orden.map(it=>{ const col=nc(CHROMATIC[it.pc]), gr=conAn&&conAn.grados[(it.pc-conAn.rootPc+12)%12]; return (
+                <button key={it.b.id} onClick={()=>conQuitar(it.b.id)} title="Sacar esta nota" style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 8px 4px 5px",borderRadius:999,cursor:"pointer",background:"#0e0e10",border:"1px solid #2c2c30",color:"#ececec"}}>
+                  <span style={{minWidth:24,height:24,padding:"0 4px",borderRadius:12,background:col,color:txtSobre(col),display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,fontFamily:"monospace"}}>{gr||it.orden}</span>
+                  <span style={{fontFamily:"'Libre Baskerville',serif",fontWeight:700,fontSize:13}}>{nombreLat(RAIZ_NOM[it.pc])}{it.oct}</span>
+                  <span style={{fontSize:9.5,color:"#7c7c82"}}>{it.mano}</span><span style={{fontSize:12,color:"#8a8a90"}}>✕</span>
+                </button>); })}
+            </div>)}
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:4}}>
+            <button disabled={!orden.length} style={uiPill(true,{padding:"7px 14px"})} onClick={()=>conTocar(false)}>▶ Escuchar acorde</button>
+            <button disabled={!orden.length} style={uiPill(false,{padding:"7px 14px"})} onClick={()=>conTocar(true)}>▶ Arpegio</button>
+            <button disabled={!orden.length} style={uiPill(false,{padding:"7px 14px"})} onClick={()=>conIds.length&&conQuitar(conIds[conIds.length-1])}>↶ Quitar la última</button>
+            <button disabled={!orden.length} style={uiPill(false,{padding:"7px 14px",marginLeft:"auto"})} onClick={()=>{setConSel(m=>({...m,[bellows]:[]}));setConRaiz(null);}}>⟳ Limpiar</button>
+          </div>
+          <details style={{marginTop:12,borderTop:"1px solid #232326",paddingTop:10}}>
+            <summary style={{cursor:"pointer",fontFamily:UI_FONT,fontSize:12,fontWeight:600,color:"#cfcfd4"}}>Nombres: cómo se escribe y nombres propios</summary>
+            <div style={{marginTop:10}}>
+              <p style={{fontSize:11.5,color:"#8a8a8a",margin:"0 0 10px",lineHeight:1.5}}>El nombre sale de las notas que armaste: tercera, quinta, séptima, tensiones y alteraciones. Si preferís otra forma de escribirlo para este acorde, cambiala acá y se guarda para esa estructura en todas las tonalidades.</p>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,marginBottom:10}}>
+                <Desplegable etiqueta="Estilo de cifrado" valor={cifEstilo()} opciones={[["jazz","△7 · m7 · ø7 · °7"],["amer","maj7 · m7 · m7♭5 · dim7"]]} onChange={v=>{ try{localStorage.setItem("harmonia_estilo_cifrado",v);}catch(e){} setConVer(n=>n+1); }}/>
+              </div>
+              {conAn&&!conAn.intervalo ? (
+                <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"flex-end",marginBottom:6}}>
+                  <label style={{display:"flex",flexDirection:"column",gap:5,flex:"1 1 200px"}}>
+                    <span style={uiLabel}>Escritura de este acorde (después de la raíz)</span>
+                    <input value={conTxt} onChange={e=>setConTxt(e.target.value)} placeholder={conAn.defaultSuf||"mayor"} style={{...inpS,fontFamily:"monospace",fontSize:13}}/>
+                  </label>
+                  <button style={uiPill(true,{padding:"8px 14px"})} onClick={conGuardar}>Guardar mi nombre</button>
+                </div>) : <p style={{fontSize:11.5,color:"#6a6a70",margin:"0 0 6px"}}>Armá un acorde de tres notas o más para poder ponerle tu propio nombre.</p>}
+              {conMsg&&<p style={{fontSize:11.5,color:"#8a8a8a",margin:"4px 0 8px"}}>{conMsg}</p>}
+              {claves.length>0 && (
+                <div style={{marginTop:8}}>
+                  <p style={{...uiLabel,margin:"0 0 6px"}}>Mis nombres guardados</p>
+                  {claves.map(k=>(
+                    <div key={k} style={{display:"flex",gap:8,alignItems:"center",padding:"4px 0",borderTop:"1px solid #1c1c1f",fontSize:12,color:"#cfcfd4"}}>
+                      <b style={{minWidth:70}}>Do {propios[k]}</b><span style={{color:"#7c7c82",flex:1}}>{ejC(k)}</span>
+                      <button style={uiPill(false,{padding:"2px 9px",fontSize:11})} onClick={()=>{ const p={...cifPropios()}; delete p[k]; cifGuardarPropios(p); setConVer(v=>v+1); }}>Borrar</button>
+                    </div>))}
+                  <button style={uiPill(false,{padding:"6px 14px",marginTop:8})} onClick={conCopiar}>⧉ Copiar mis nombres</button>
+                </div>)}
+            </div>
+          </details>
+        </div>);
+      })()}
+
       {modo==="lineas" && (()=>{
         const manos=[...(view!=="derecha"?[["L","Mano izquierda",linL,leftBtns]]:[]),...(view!=="izquierda"?[["R","Mano derecha",linR,rightBtns]]:[])];
         const maxL=Math.max(0,...manos.map(m=>m[2].length));
@@ -4670,7 +4814,7 @@ function EntrenadorTab({preset}={}){
               👁 {reveal?"Ocultar respuesta":"Ver respuesta"}
             </button>
           )}
-          {modo!=="escalas" && !esCam && modo!=="lineas" && <button onClick={()=>setChecked(true)} style={{padding:"6px 14px",borderRadius:9,border:"none",background:"#e6e6e6",color:"#0a0a0a",fontWeight:800,fontSize:11,cursor:"pointer"}}>
+          {modo!=="escalas" && !esCam && modo!=="lineas" && modo!=="construir" && <button onClick={()=>setChecked(true)} style={{padding:"6px 14px",borderRadius:9,border:"none",background:"#e6e6e6",color:"#0a0a0a",fontWeight:800,fontSize:11,cursor:"pointer"}}>
             ✓ Corregir
           </button>}
           <button onClick={reiniciarFuelle} style={{padding:"6px 12px",borderRadius:9,border:"1px solid #2a2a2a",background:"transparent",color:"#8a8a8a",fontSize:10,cursor:"pointer"}}>
@@ -4686,6 +4830,12 @@ function EntrenadorTab({preset}={}){
             <span style={{color:"#8a8a8a"}}>{modo==="voz"?"Acorde":modo==="arpegio"?"Arpegio":"Camino"}: <b style={{color:"#e6e6e6"}}>{modo==="voz" ? acorde.name : modo==="arpegio" ? acorde.name+" · "+(acoInvOk===0?"fundamental":acoInvOk+"ª inversión") : nombreLat(escRoot)+" "+camDef.nombre}</b></span>
             <span style={{color:"#8a8a8a"}}>Fuelle: <b style={{color:"#e6e6e6"}}>{bellows==="abre"?"abriendo":"cerrando"}</b></span>
             {cam && <span style={{color:"#8a8a8a"}}>Izq.: <b style={{color:"#e6e6e6"}}>{cam.manos.L.nodos.length-cam.manos.L.faltan.length}/{cam.manos.L.nodos.length}</b> · Der.: <b style={{color:"#e6e6e6"}}>{cam.manos.R.nodos.length-cam.manos.R.faltan.length}/{cam.manos.R.nodos.length}</b></span>}
+          </>
+        ) : modo==="construir" ? (
+          <>
+            <span style={{color:"#8a8a8a"}}>Acorde: <b style={{color:"#e6e6e6"}}>{conAn?conAn.nombre:conItems.length?"(marcá al menos dos notas)":"—"}</b></span>
+            <span style={{color:"#8a8a8a"}}>Notas: <b style={{color:"#e6e6e6"}}>{conItems.length}</b></span>
+            <span style={{color:"#8a8a8a"}}>Fuelle: <b style={{color:"#e6e6e6"}}>{bellows==="abre"?"abriendo":"cerrando"}</b></span>
           </>
         ) : modo==="lineas" ? (
           <>
@@ -5893,8 +6043,7 @@ export default function HarmoniaApp(){
           <span className="block w-4 h-px" style={{background:"#a0a0a6"}}/>
         </button>
         <div style={{lineHeight:1.15}}>
-          <h1 style={{fontFamily:"'Libre Baskerville',serif",fontSize:19,fontWeight:700,letterSpacing:"0.2em",textTransform:"uppercase",color:"#ececec"}}>Harmonía</h1>
-          <p style={{fontFamily:UI_FONT,fontSize:9.5,letterSpacing:"0.24em",textTransform:"uppercase",color:"#707076",marginTop:3}}>Bandoneón · Tango · Jazz</p>
+          <h1 style={{fontFamily:"'Libre Baskerville',serif",fontSize:19,fontWeight:700,letterSpacing:"0.2em",textTransform:"uppercase",color:"#ececec"}}>BandoMaps</h1>
         </div>
         <div className="ml-auto flex items-center gap-2" style={{fontFamily:UI_FONT,fontSize:12,color:"#9a9aa0",letterSpacing:"0.04em"}}>
           <span style={{opacity:.6}}>{TABS.find(t=>t.id===tab)?.icon}</span>
@@ -6312,7 +6461,7 @@ export default function HarmoniaApp(){
       {/* Footer */}
       <div className="border-t border-gray-800 px-4 py-2 text-center flex-shrink-0">
         <p className="text-xs text-gray-700 italic">
-          Harmonía · Armonía para bandoneón · Tango · Jazz · Sistema de color tonal
+          BandoMaps · Sistema de color tonal
         </p>
       </div>
     </div>
