@@ -3075,7 +3075,7 @@ const RAICES_HERO = ["C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
 
 function PaletaRueda({compacta=false}){
   const [root,setRoot]=useState("C");
-  const [escId,setEscId]=useState("mayor");
+  const [escId,setEscId]=useState("crom");
   const [playing,setPlaying]=useState(null);
   const [sel,setSel]=useState(null);
   const [romano]=useRomanos();
@@ -3488,20 +3488,23 @@ const CAPITULOS = [
 )},
 ];
 
+// Capítulos que ven los alumnos: cómo se llega a la distribución de los doce colores y el temperamento. El resto queda en el manual completo del Organizador.
+const CAP_PUBLICOS = ["cap0","cap5","cap7"];
 // ─── Componente de la pestaña "El Código" ────────────────────────────────────
-function ElCodigoTab({irA}={}){
+function ElCodigoTab({irA,completo=false}={}){
   const [vista, setVista] = useState("metodo");   // metodo | entrenar
   const [capIdx, setCapIdx] = useState(0);
-  const cap = CAPITULOS[capIdx];
-  const partes = [...new Set(CAPITULOS.map(c=>c.parte))];
+  const CAPS = completo ? CAPITULOS : CAPITULOS.filter(c=>CAP_PUBLICOS.includes(c.id));
+  const cap = CAPS[capIdx];
+  const partes = [...new Set(CAPS.map(c=>c.parte))];
 
   return(
     <div className="stagger">
       <div className="mb-4">
         <h2 className="text-xl font-bold mb-1" style={{fontFamily:"'Libre Baskerville',serif"}}>
-          📖 El Código — Manual de teoría musical a través del color
+          {completo?"📖 Manual completo — El Código":"📖 El Código"}
         </h2>
-        <p className="text-xs text-gray-500">Temperamento cromático: un sistema de doce colores para leer música más rápido de lo que se la puede calcular.</p>
+        <p className="text-xs text-gray-500">{completo?"Versión completa del manual: solo la ves vos desde el Organizador.":"Cómo llegamos a la distribución de los doce colores y el temperamento cromático."}</p>
       </div>
 
       <div className="flex flex-wrap gap-1.5 mb-4" style={{background:"#101012",border:"1px solid #26262a",borderRadius:12,padding:4,width:"fit-content"}}>
@@ -3526,7 +3529,7 @@ function ElCodigoTab({irA}={}){
         style={{fontFamily:"monospace"}}>
         {partes.map(parte=>(
           <optgroup key={parte} label={parte}>
-            {CAPITULOS.map((c,i)=> c.parte===parte && (
+            {CAPS.map((c,i)=> c.parte===parte && (
               <option key={c.id} value={i}>{c.titulo}</option>
             ))}
           </optgroup>
@@ -3545,7 +3548,7 @@ function ElCodigoTab({irA}={}){
           style={{background:"#1a1a1a",borderColor:"#333333",color:"#e6e6e6"}}>
           ← Anterior
         </button>
-        <button disabled={capIdx===CAPITULOS.length-1} onClick={()=>setCapIdx(i=>Math.min(CAPITULOS.length-1,i+1))}
+        <button disabled={capIdx===CAPS.length-1} onClick={()=>setCapIdx(i=>Math.min(CAPS.length-1,i+1))}
           className="px-4 py-2 rounded-xl text-sm border disabled:opacity-30"
           style={{background:"#1a1a1a",borderColor:"#333333",color:"#e6e6e6"}}>
           Siguiente →
@@ -3764,18 +3767,27 @@ function PaintCanvas({ buttons, guesses, keyOf, checked, correctOf, onTapButton,
           <svg width={W} height={H} style={{position:"absolute",left:0,top:0,pointerEvents:"none",overflow:"visible"}}>
             <defs><marker id="camflecha" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="3.6" markerHeight="3.6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#fff" fillOpacity=".8"/></marker></defs>
             {flechas.map((f,i)=>{
-              const dx=f.b.x-f.a.x, dy=f.b.y-f.a.y, d=Math.hypot(dx,dy)||1, r=BTN_SIZE/2+2;
+              const dx=f.b.x-f.a.x, dy=f.b.y-f.a.y, d=Math.hypot(dx,dy)||1, r=BTN_SIZE/2+2, rr=BTN_SIZE/2;
               if(d<=2*r+6) return null;
-              const ia=G?idxDe(f.a):-1, ib=G?idxDe(f.b):-1, ruta=(G&&ia>=0&&ib>=0)?rutaCanal(G,ia,ib):null;
-              if(ruta&&ruta.length){
-                const u=(p,q,k)=>{ const l=Math.hypot(q.x-p.x,q.y-p.y)||1; return {x:p.x+(q.x-p.x)/l*k,y:p.y+(q.y-p.y)/l*k}; };
-                const pts=[u(f.a,ruta[0],r),...ruta,u(f.b,ruta[ruta.length-1],r+2)], mid=(p,q)=>({x:(p.x+q.x)/2,y:(p.y+q.y)/2});
-                let dd=`M${pts[0].x},${pts[0].y}`; const m0=mid(pts[0],pts[1]); dd+=` L${m0.x},${m0.y}`;
-                for(let k=1;k<pts.length-1;k++){ const nx=k<pts.length-2?mid(pts[k],pts[k+1]):pts[k+1]; dd+=` Q${pts[k].x},${pts[k].y} ${nx.x},${nx.y}`; }
-                return <path key={i} d={dd} fill="none" stroke="#fff" strokeOpacity=".55" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={f.dash?"6 5":undefined} markerEnd="url(#camflecha)"/>;
-              }
-              return <line key={i} x1={f.a.x+dx/d*r} y1={f.a.y+dy/d*r} x2={f.b.x-dx/d*(r+1)} y2={f.b.y-dy/d*(r+1)}
-                stroke="#fff" strokeOpacity=".55" strokeWidth="2" strokeLinecap="round" strokeDasharray={f.dash?"6 5":undefined} markerEnd="url(#camflecha)"/>;
+              const ia=idxDe(f.a), ib=idxDe(f.b);
+              const libre=(p,q)=>{ const vx=q.x-p.x, vy=q.y-p.y, l2=vx*vx+vy*vy||1;
+                for(let k=0;k<buttons.length;k++){ if(k===ia||k===ib) continue; const cx=buttons[k].x+rr, cy=buttons[k].y+rr;
+                  const t=Math.max(0,Math.min(1,((cx-p.x)*vx+(cy-p.y)*vy)/l2)), ex=p.x+t*vx-cx, ey=p.y+t*vy-cy;
+                  if(ex*ex+ey*ey<(rr+7)*(rr+7)) return false; } return true; };
+              const recta=()=>(<line key={i} x1={f.a.x+dx/d*r} y1={f.a.y+dy/d*r} x2={f.b.x-dx/d*(r+1)} y2={f.b.y-dy/d*(r+1)}
+                stroke="#fff" strokeOpacity=".5" strokeWidth="1.8" strokeLinecap="round" strokeDasharray={f.dash?"6 5":undefined} markerEnd="url(#camflecha)"/>);
+              if(rutaFlechas!=="canal"||!G||ia<0||ib<0||libre(f.a,f.b)) return recta();
+              const ruta=rutaCanal(G,ia,ib); if(!ruta||!ruta.length) return recta();
+              // se quitan los giros que no hacen falta: queda el menor número de tramos rectos que esquivan los botones
+              const wps=[f.a,...ruta,f.b], pts=[wps[0]]; let k0=0;
+              while(k0<wps.length-1){ let j=wps.length-1; while(j>k0+1&&!libre(wps[k0],wps[j])) j--; pts.push(wps[j]); k0=j; }
+              const u=(p,q,k)=>{ const l=Math.hypot(q.x-p.x,q.y-p.y)||1; return {x:p.x+(q.x-p.x)/l*k,y:p.y+(q.y-p.y)/l*k}; };
+              const P=[...pts]; P[0]=u(pts[0],pts[1],r); P[P.length-1]=u(pts[pts.length-1],pts[pts.length-2],r+2);
+              let dd=`M${P[0].x},${P[0].y}`;
+              for(let k=1;k<P.length-1;k++){ const l1=Math.hypot(P[k].x-P[k-1].x,P[k].y-P[k-1].y), l2=Math.hypot(P[k+1].x-P[k].x,P[k+1].y-P[k].y), kk=Math.min(9,l1/2,l2/2);
+                const A=u(P[k],P[k-1],kk), B=u(P[k],P[k+1],kk); dd+=` L${A.x},${A.y} Q${P[k].x},${P[k].y} ${B.x},${B.y}`; }
+              dd+=` L${P[P.length-1].x},${P[P.length-1].y}`;
+              return <path key={i} d={dd} fill="none" stroke="#fff" strokeOpacity=".5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={f.dash?"6 5":undefined} markerEnd="url(#camflecha)"/>;
             })}
           </svg>
         )}
@@ -6534,7 +6546,13 @@ export default function HarmoniaApp(){
 
             {/* ══ ENTRENADOR ══ */}
             {tab==="entrenador"&&<EntrenadorTab preset={preset}/>}
-            {tab==="organizador"&&!window.__ALUMNO&&<OrganizadorTab onProbar={practicar}/>}
+            {tab==="organizador"&&!window.__ALUMNO&&<>
+              <OrganizadorTab onProbar={practicar}/>
+              <details style={{marginTop:22,background:"#101012",border:"1px solid #26262a",borderRadius:12,padding:"10px 14px"}}>
+                <summary style={{cursor:"pointer",fontFamily:UI_FONT,fontSize:12,fontWeight:600,color:"#cfcfd4"}}>📚 Manual completo (solo para vos)</summary>
+                <div style={{marginTop:14}}><ElCodigoTab completo/></div>
+              </details>
+            </>}
             {tab==="tareas"&&<MisTareasTab onPracticar={practicar}/>}
 
             {/* ══ QUINTAS ══ */}
